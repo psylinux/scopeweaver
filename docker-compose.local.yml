@@ -1,0 +1,66 @@
+# Local ScopeWeaver v0.1.0 + auth fix. Built from this checkout, never pulled.
+# Console: http://127.0.0.1:8797 (loopback only). Recording proxy not published.
+# Usage: docker compose -f docker-compose.local.yml up -d --build
+name: scopeweaver-local
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-artex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-artex}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  scopeweaver:
+    build:
+      context: .
+      dockerfile: Dockerfile.hardened
+    image: scopeweaver-local:0.1.0-authfix.1
+    pull_policy: build
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SCOPEWEAVER_LANGUAGE: ${SCOPEWEAVER_LANGUAGE:-en}
+      ARTEX_PG_DSN: postgres://${POSTGRES_USER:-artex}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-artex}?sslmode=disable
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ARTEX_LLM_PROVIDER: ${ARTEX_LLM_PROVIDER:-}
+      ARTEX_LLM_MODEL: ${ARTEX_LLM_MODEL:-}
+      ARTEX_LLM_BASE_URL: ${ARTEX_LLM_BASE_URL:-}
+      ARTEX_LLM_PROXY: ${ARTEX_LLM_PROXY:-}
+      NORMA_RIPGREP_NO_INSTALL: "1"
+    ports:
+      - "127.0.0.1:8797:8787"
+      # - "127.0.0.1:8798:8788"   # recording proxy, only if needed
+    volumes:
+      - sw_data:/app/data
+      # JWT signing key, kept out of the browsable data directory.
+      - sw_keys:/app/keys
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    shm_size: "1gb"
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  sw_data:
+  sw_keys:

@@ -1,0 +1,99 @@
+# syntax=docker/dockerfile:1.7
+#
+# Local, source-built ScopeWeaver v0.1.0 with the upstream auth fix (a951e4a).
+#
+# Differences from the stock Dockerfile:
+# - base images and Playwright packages pinned (same pins as the audited
+#   failsafe ARTEX v0.3.15 build);
+# - npm ci --ignore-scripts and go mod verify;
+# - Node 22 copied from the pinned builder instead of curl | bash NodeSource;
+# - version suffix "-authfix.1" keeps the one-click updater disabled;
+# - /usr/bin/chromium points at the Playwright Chromium for the api-recon skill.
+
+ARG GO_IMAGE=golang:1.26.10@sha256:cfa27959837144bf4649802ba38e59daffd0dd2a7994aa83daaf113285b0f551
+ARG NODE_IMAGE=node:22-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
+
+ARG PLAYWRIGHT_MCP_VERSION=0.0.85
+ARG PLAYWRIGHT_CLI_VERSION=0.1.24
+ARG PLAYWRIGHT_VERSION=1.65.0
+
+FROM ${NODE_IMAGE} AS frontend
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+# Skip lifecycle hooks such as husky's prepare script.
+RUN npm ci --ignore-scripts
+COPY web/ ./
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build:static
+
+FROM ${GO_IMAGE} AS backend
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+COPY . .
+COPY --from=frontend /src/web/out/ ./server/webui/dist/
+RUN CGO_ENABLED=0 go build \
+      -trimpath \
+      -buildvcs=false \
+      -tags embedui \
+      -ldflags="-buildid= -X main.version=0.1.0-authfix.1" \
+      -o /scopeweaver ./cmd/artex
+
+FROM ${PYTHON_IMAGE} AS runtime
+ARG PLAYWRIGHT_MCP_VERSION
+ARG PLAYWRIGHT_CLI_VERSION
+ARG PLAYWRIGHT_VERSION
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates ripgrep curl wget vim git jq unzip tzdata binutils \
+      dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
+COPY --from=frontend /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version && npm --version
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npm install -g \
+      @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
+      @playwright/cli@${PLAYWRIGHT_CLI_VERSION} \
+      playwright@${PLAYWRIGHT_VERSION} \
+    && playwright --version \
+    && playwright install --with-deps chromium \
+    && for pw in /usr/local/lib/node_modules/@playwright/*/node_modules/playwright/cli.js; do \
+         [ -f "$pw" ] && node "$pw" install chromium; \
+       done \
+    && npm cache clean --force \
+    && rm -rf /root/.npm /var/lib/apt/lists/*
+
+RUN set -eux; \
+    CHROME_BIN="$(find /ms-playwright -path '*/chrome-linux*/chrome' -type f | head -n1)"; \
+    test -n "$CHROME_BIN"; \
+    ln -sf "$CHROME_BIN" /usr/bin/chromium; \
+    ln -sf "$CHROME_BIN" /usr/bin/chromium-browser; \
+    chmod -R a+rX /ms-playwright; \
+    "$CHROME_BIN" --version
+
+WORKDIR /app
+COPY --from=backend /scopeweaver /app/scopeweaver
+COPY start.sh /app/start.sh
+COPY skills/ /app/skills/
+COPY LICENSE /app/LICENSE
+RUN chmod +x /app/scopeweaver /app/start.sh \
+    && mkdir -p /app/data /app/keys /app/.playwright \
+    && ln -sfn /app/keys/jwt.key /app/jwt.key \
+    && printf '%s\n' '{"browser":{"browserName":"chromium","launchOptions":{"args":["--no-sandbox"]}}}' > /app/.playwright/cli.config.json
+
+ENV NODE_PATH=/usr/local/lib/node_modules \
+    TMPDIR=/tmp \
+    NORMA_RIPGREP_NO_INSTALL=1 \
+    NEXT_TELEMETRY_DISABLED=1
+
+VOLUME ["/app/data"]
+EXPOSE 8787 8788
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8787/api/health || exit 1
+ENTRYPOINT ["/app/start.sh"]
+CMD ["-addr", ":8787", "-proxy", ":8788"]
