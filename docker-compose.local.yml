@@ -47,6 +47,11 @@ services:
       - sw_data:/app/data
       # JWT signing key, kept out of the browsable data directory.
       - sw_keys:/app/keys
+      # Researcher identification (platform User-Agent rules), git-ignored, read-only.
+      - ./identity.local/curlrc:/root/.curlrc:ro
+      - ./identity.local/wgetrc:/root/.wgetrc:ro
+      - ./identity.local/cli.config.json:/app/.playwright/cli.config.json:ro
+      - ./identity.local/playwright-mcp.json:/app/identity/playwright-mcp.json:ro
     restart: unless-stopped
     stop_grace_period: 30s
     security_opt:
