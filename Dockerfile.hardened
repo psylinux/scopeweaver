@@ -7,7 +7,7 @@
 #   failsafe ARTEX v0.3.15 build);
 # - npm ci --ignore-scripts and go mod verify;
 # - Node 22 copied from the pinned builder instead of curl | bash NodeSource;
-# - version suffix "-authfix.1" keeps the one-click updater disabled;
+# - version suffix "-authfix.2" keeps the one-click updater disabled;
 # - /usr/bin/chromium points at the Playwright Chromium for the api-recon skill.
 
 ARG GO_IMAGE=golang:1.26.10@sha256:cfa27959837144bf4649802ba38e59daffd0dd2a7994aa83daaf113285b0f551
@@ -30,6 +30,9 @@ RUN npm run build:static
 FROM ${GO_IMAGE} AS backend
 WORKDIR /src
 COPY go.mod go.sum ./
+# The norma SDK is vendored with the tool_use boundary fix; go.mod replaces it
+# with this directory, so it must be present before the module download step.
+COPY third_party/ ./third_party/
 RUN go mod download && go mod verify
 COPY . .
 COPY --from=frontend /src/web/out/ ./server/webui/dist/
@@ -37,7 +40,7 @@ RUN CGO_ENABLED=0 go build \
       -trimpath \
       -buildvcs=false \
       -tags embedui \
-      -ldflags="-buildid= -X main.version=0.1.0-authfix.1" \
+      -ldflags="-buildid= -X main.version=0.1.0-authfix.2" \
       -o /scopeweaver ./cmd/artex
 
 FROM ${PYTHON_IMAGE} AS runtime
