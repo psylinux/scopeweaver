@@ -28,10 +28,15 @@ const (
 
 // StreamEvent is one normalized model-level streaming event (FR-03.5).
 type StreamEvent struct {
-	Type       StreamEventType
-	Text       string // text/thinking/tool_input JSON fragment
-	ToolID     string // tool_use_start
-	ToolName   string // tool_use_start
+	Type     StreamEventType
+	Text     string // text/thinking/tool_input JSON fragment
+	ToolID   string // tool_use_start
+	ToolName string // tool_use_start
+	// ToolIndex identifies which parallel tool call this event belongs to. A
+	// Chat Completions gateway announces every call in one chunk and then
+	// streams each call's arguments separately; without the index the fragments
+	// cannot be attributed to the right call.
+	ToolIndex  int    // tool_use_start / tool_input_delta
 	StopReason string // message_delta
 	Usage      Usage  // message_start / message_delta
 }

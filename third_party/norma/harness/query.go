@@ -796,25 +796,63 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 	exec = newStreamExec(l)
 	acc := llm.NewAccumulator()
 
-	var building bool
-	var curID, curName string
-	var curInput strings.Builder
-	finalizeTool := func() bool { // false = consumer stopped
-		if !building {
+	// Tool calls are tracked by the index the adapter assigns. A Chat Completions
+	// gateway announces every parallel call in ONE chunk and only then streams
+	// each call's arguments, so the fragments must be attributed by index: a
+	// single buffer merged them into invalid JSON ("{...}{...}") and dispatched
+	// the first call with "{}" before its arguments had arrived.
+	type pendingTool struct {
+		id, name string
+		input    strings.Builder
+	}
+	byIndex := map[int]*pendingTool{}
+	var order []int
+
+	finalize := func(idx int) bool { // false = consumer stopped
+		t := byIndex[idx]
+		if t == nil {
 			return true
 		}
-		building = false
-		raw := strings.TrimSpace(curInput.String())
-		curInput.Reset()
+		delete(byIndex, idx)
+		for i, v := range order {
+			if v == idx {
+				order = append(order[:i], order[i+1:]...)
+				break
+			}
+		}
+		raw := strings.TrimSpace(t.input.String())
 		if raw == "" || !jsonValid(raw) {
 			raw = "{}"
 		}
-		block := llm.ContentBlock{Type: llm.BlockToolUse, ID: curID, Name: curName, Input: []byte(raw)}
+		block := llm.ContentBlock{Type: llm.BlockToolUse, ID: t.id, Name: t.name, Input: []byte(raw)}
 		if !l.emit(Event{Kind: KindToolUse, ToolUse: &block}) {
 			return false
 		}
 		exec.add(block)
 		return exec.drain()
+	}
+	// finalizeReady dispatches every pending call that has received arguments: it
+	// is complete enough to run and the stream has moved past it, so a slow tool
+	// overlaps the rest of the response. A call still waiting for its first
+	// argument stays open, because a gateway announces all parallel calls before
+	// streaming any of them.
+	finalizeReady := func() bool {
+		for _, idx := range append([]int(nil), order...) {
+			if t := byIndex[idx]; t != nil && t.input.Len() > 0 {
+				if !finalize(idx) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	finalizeAll := func() bool {
+		for _, idx := range append([]int(nil), order...) {
+			if !finalize(idx) {
+				return false
+			}
+		}
+		return true
 	}
 
 	for ev, e := range l.deps.CallModel(l.ctx, req) {
@@ -822,21 +860,27 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 			err = e
 			break
 		}
-		// Only a new tool_use start, or the end of the stream, closes a
-		// tool_use block. Text and thinking deltas are NOT boundaries: Chat
-		// Completions gateways open a tool_call on the chunk carrying id/name
-		// and stream function.arguments several chunks later, with content or
-		// reasoning deltas in between. Finalizing on those deltas dispatched
-		// the tool with raw == "{}" and dropped every argument delta that
-		// followed, because curInput.WriteString is gated on `building`, while
-		// acc.Message() recorded the real arguments: the tool ran empty and the
-		// replayed history claimed otherwise.
 		switch ev.Type {
-		case llm.SEToolInputJSON:
-			if building {
-				curInput.WriteString(ev.Text)
+		case llm.SEToolUseStart:
+			// A start closes what was open: the same index reused for a sequential
+			// call, or earlier calls that already have their arguments. This is what
+			// lets a tool begin running while the model is still streaming.
+			if !finalize(ev.ToolIndex) || !finalizeReady() {
+				return asst, exec, "", nil, true, false
 			}
+			byIndex[ev.ToolIndex] = &pendingTool{id: ev.ToolID, name: ev.ToolName}
+			order = append(order, ev.ToolIndex)
+		case llm.SEToolInputJSON:
+			t := byIndex[ev.ToolIndex]
+			if t == nil {
+				t = &pendingTool{}
+				byIndex[ev.ToolIndex] = t
+				order = append(order, ev.ToolIndex)
+			}
+			t.input.WriteString(ev.Text)
 		case llm.SETextDelta:
+			// Text is not a boundary: a gateway emits the preamble in the same chunk
+			// that opens the call, before the arguments arrive.
 			if ev.Text != "" && !l.emit(Event{Kind: KindText, Text: ev.Text}) {
 				return asst, exec, "", nil, true, false
 			}
@@ -844,15 +888,10 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 			if ev.Text != "" && !l.emit(Event{Kind: KindThinking, Text: ev.Text}) {
 				return asst, exec, "", nil, true, false
 			}
-		case llm.SEToolUseStart:
-			if !finalizeTool() {
-				return asst, exec, "", nil, true, false
-			}
-			curID, curName, building = ev.ToolID, ev.ToolName, true
 		}
 		acc.Add(ev)
 	}
-	if !finalizeTool() {
+	if !finalizeAll() {
 		return asst, exec, "", nil, true, false
 	}
 	l.usage.Add(acc.Usage)

@@ -12,6 +12,11 @@ import (
 type Accumulator struct {
 	blocks     []ContentBlock
 	toolInputs []*strings.Builder
+	// toolPos maps the provider's tool call index to the position of its block in
+	// toolInputs. A Chat Completions gateway announces every parallel call in one
+	// chunk and then streams each call's arguments separately, so the fragments
+	// must be routed by index rather than appended to the block that started last.
+	toolPos    map[int]int
 	textBuf    *strings.Builder
 	thinkBuf   *strings.Builder
 	thinkSig   string // signature for the current thinking block
@@ -46,8 +51,18 @@ func (a *Accumulator) Add(ev StreamEvent) {
 		a.flushThinking()
 		a.blocks = append(a.blocks, ContentBlock{Type: BlockToolUse, ID: ev.ToolID, Name: ev.ToolName})
 		a.toolInputs = append(a.toolInputs, &strings.Builder{})
+		if a.toolPos == nil {
+			a.toolPos = map[int]int{}
+		}
+		// An index the provider reuses means a new call, so the mapping is
+		// overwritten: later fragments belong to the block that just started.
+		a.toolPos[ev.ToolIndex] = len(a.toolInputs) - 1
 	case SEToolInputJSON:
-		if n := len(a.toolInputs); n > 0 {
+		if pos, ok := a.toolPos[ev.ToolIndex]; ok {
+			a.toolInputs[pos].WriteString(ev.Text)
+		} else if n := len(a.toolInputs); n > 0 {
+			// A fragment for an index that never started: fall back to the call in
+			// flight, which is what adapters that do not populate the index mean.
 			a.toolInputs[n-1].WriteString(ev.Text)
 		}
 	case SEMessageDelta:
