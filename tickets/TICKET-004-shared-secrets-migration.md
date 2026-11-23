@@ -7,7 +7,7 @@ priority: high
 blocked_by: none
 owner: shared-secrets-004
 branch: claude/shared-secrets-004-cd979a
-pr: https://github.com/psylinux/scopeweaver/pull/NN
+pr: https://github.com/psylinux/scopeweaver/pull/2
 source: operator request; programs/_ops/SECRETS-STANDARD.md section 6 (consumer migration)
 ---
 
