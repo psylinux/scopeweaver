@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/llmrec"
+	"github.com/Autumn-27/artex/sharedsecrets"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/llm"
@@ -143,10 +144,16 @@ func compactionConfig(windowTokens int) *compaction.Config {
 //	ARTEX_LLM_BASE_URL = endpoint        (optional)
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
+//
+// The credentials resolve through the shared bug bounty secrets file: an
+// explicit ANTHROPIC_API_KEY / OPENAI_API_KEY environment variable still wins,
+// and when it is unset the canonical name from ~/.config/bugbounty/secrets.yaml
+// (ANTHROPIC_API_TOKEN / OPENAI_API_TOKEN) is used. With neither configured the
+// provider stays unset and the engine idles, as before.
 func FromEnv() (Config, bool) {
 	prov := os.Getenv("ARTEX_LLM_PROVIDER")
-	anthKey := os.Getenv("ANTHROPIC_API_KEY")
-	oaiKey := os.Getenv("OPENAI_API_KEY")
+	anthKey := sharedsecrets.Value("ANTHROPIC_API_KEY", "ANTHROPIC_API_TOKEN")
+	oaiKey := sharedsecrets.Value("OPENAI_API_KEY", "OPENAI_API_TOKEN")
 
 	if prov == "" {
 		switch {

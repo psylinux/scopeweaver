@@ -12,6 +12,7 @@ import (
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/notify"
+	"github.com/Autumn-27/artex/sharedsecrets"
 )
 
 // Global keys use the existing settings table; no new table is needed.
@@ -372,6 +373,12 @@ func (n *Notifier) adapt(ch *db.NotificationChannel) (notify.Channel, map[string
 	if cfg == nil {
 		cfg = map[string]any{}
 	}
+	// Resolve any ${NAME} reference (such as a webhook url set to
+	// ${DISCORD_WEBHOOK_ARTEX}) from the shared secrets file at send time, so the
+	// real credential is never persisted in the channel configuration. A name with
+	// no value stays a visible placeholder and the channel's own validation reports
+	// it; nothing here can crash delivery.
+	sharedsecrets.ExpandRefs(cfg)
 	return channel, cfg, true
 }
 
