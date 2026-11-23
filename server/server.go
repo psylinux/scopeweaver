@@ -25,6 +25,7 @@ import (
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/locale"
+	"github.com/Autumn-27/artex/metrics"
 	"github.com/Autumn-27/artex/report"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/llm"
@@ -939,8 +940,20 @@ func (s *Server) Handler() http.Handler {
 	api := withLocale(cors(s.requireAuth(mux)))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
+	// Prometheus scrape endpoint. Public and unauthenticated like a normal exporter:
+	// it exposes only aggregate WAF-block counters (status/vendor/request totals),
+	// never a target host, URL, header or secret. Kept off /api/ so it skips the JWT
+	// gate the scraper cannot satisfy.
+	root.HandleFunc("GET /metrics", s.serveMetrics)
 	root.Handle("/", s.webuiHandler())
 	return root
+}
+
+// serveMetrics renders the process-wide WAF-block counters in the Prometheus text
+// exposition format. See package metrics for the surface.
+func (s *Server) serveMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	metrics.Default.WritePrometheus(w)
 }
 
 // --- handlers ---
@@ -3296,6 +3309,7 @@ func (s *Server) settingsPayload() map[string]any {
 	return map[string]any{
 		"language":                 string(locale.ServerDefault()),
 		"traffic_capture":          s.m.TrafficEnabled(),
+		"traffic_metrics":          s.m.MetricsEnabled(), // Metrics-only WAF-block counting; proxy in path, no body storage.
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"llm_record":               s.m.LLMRecordEnabled(),
 		"web_search_enabled":       on,
@@ -3367,6 +3381,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Language            *string `json:"language"`
 		TrafficCapture      *bool   `json:"traffic_capture"`
+		TrafficMetrics      *bool   `json:"traffic_metrics"` // Metrics-only mode: proxy in path, count WAF blocks, no body storage.
 		AgentTrafficBinding *bool   `json:"agent_traffic_binding"`
 		LLMRecord           *bool   `json:"llm_record"` // LLM recording defaults off and changes immediately without rebuilding agents.
 		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
@@ -3530,6 +3545,15 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TrafficCapture != nil {
 		if err := s.m.SetTrafficEnabled(*req.TrafficCapture); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		changed = true
+	}
+	if req.TrafficMetrics != nil {
+		// Metrics-only mode changes the proxy/CA handed to agents (so blocks are
+		// counted) without persisting bodies; rebuild agents so egress picks it up.
+		if err := s.m.SetMetricsEnabled(*req.TrafficMetrics); err != nil {
 			writeError(w, 500, err)
 			return
 		}

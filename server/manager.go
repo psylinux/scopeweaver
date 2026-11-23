@@ -233,7 +233,12 @@ type Manager struct {
 	tasks       map[string]*Task
 	active      string
 	trafficOn   bool // Traffic capture flag (off by default; settings.traffic_capture).
-	llmRecOn    bool // LLM recording flag (off by default; settings.llm_record).
+	// metricsOn puts the recording proxy in the agents' egress path and counts WAF
+	// blocks without persisting bodies (off by default; settings.traffic_metrics).
+	// Independent of trafficOn: capture implies full persistence, metrics-only does
+	// not. Either one being on routes agent traffic through the MITM. See ProxyAddr.
+	metricsOn bool
+	llmRecOn  bool // LLM recording flag (off by default; settings.llm_record).
 	// Web-search flag and provider (off by default; settings.web_search_*). brave-free needs braveKey; tavily needs tavilyKey.
 	// webSearchProxy is an independent HTTP/HTTPS/SOCKS5 egress proxy, separate from the traffic-recording MITM proxy.
 	webSearchOn      bool
@@ -250,7 +255,11 @@ type Manager struct {
 
 // Settings keys the UI toggles at runtime.
 const (
-	settingTrafficCapture      = "traffic_capture"
+	settingTrafficCapture = "traffic_capture"
+	// settingTrafficMetrics enables metrics-only mode: the recording proxy is put in
+	// the agents' egress path and WAF blocks are counted, but no bodies are stored.
+	// Distinct from traffic_capture, which also persists full exchanges.
+	settingTrafficMetrics      = "traffic_metrics"
 	settingAgentTrafficBinding = "agent_traffic_binding"
 	settingWebSearchOn         = "web_search_enabled"
 	settingWebSearchBackend    = "web_search_backend"
@@ -415,6 +424,12 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	// Asset auto-completion engine (§5): HTTP probes routed through the recording
 	// proxy (via m.ProxyAddr, which honors the traffic-capture toggle).
 	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
+	// Metrics-only mode: count WAF blocks through the proxy without persisting
+	// bodies. Persistence follows capture, so a metrics-only start lowers it.
+	m.metricsOn = pg.GetBool(settingTrafficMetrics, false)
+	if m.traffic != nil {
+		m.traffic.SetPersist(m.trafficOn)
+	}
 	// LLM recording flag, disabled by default and read by the recorder on every call.
 	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
 	// Load persisted web-search config (default: off, ddgs).
@@ -468,12 +483,53 @@ func (m *Manager) SetTrafficEnabled(on bool) error {
 	m.mu.Lock()
 	m.trafficOn = on
 	m.mu.Unlock()
+	// Capture on persists full exchanges; capture off leaves persistence off so a
+	// concurrently enabled metrics-only mode still counts without storing bodies.
+	if m.traffic != nil {
+		m.traffic.SetPersist(on)
+	}
 	// Inject (on) or strip (off) the recording proxy + CA on the browser MCP so
 	// Playwright routes through the MITM. Must run after the flag flip above, since
 	// ProxyAddr/ProxyCACert honor it. putSettings rebuilds agents next (applyLLM),
 	// which re-spawns the MCP with the new args/env.
 	m.syncBrowserMCPProxy()
 	return nil
+}
+
+// MetricsEnabled reports whether metrics-only WAF-block counting is on (default
+// off). It puts the recording proxy in the agents' egress path without persisting
+// bodies; see ProxyAddr.
+func (m *Manager) MetricsEnabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.metricsOn
+}
+
+// SetMetricsEnabled persists and applies the metrics-only toggle. Callers must
+// rebuild the agents (applyLLM) afterwards so the proxy/CA injection takes hold.
+// Persistence is unaffected: it follows traffic_capture, so turning metrics on does
+// not start storing bodies.
+func (m *Manager) SetMetricsEnabled(on bool) error {
+	if err := m.pg.SetBool(settingTrafficMetrics, on); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.metricsOn = on
+	m.mu.Unlock()
+	// Keep the browser MCP's egress in sync: metrics-only also routes Playwright
+	// through the MITM (with its CA), so blocks from browser egress are counted.
+	m.syncBrowserMCPProxy()
+	return nil
+}
+
+// proxyInPath reports whether agent egress must traverse the recording MITM proxy:
+// true when full capture or metrics-only mode is on. It is the single source of
+// truth for ProxyAddr/ProxyCACert so both modes route (and, for metrics-only, count)
+// agent traffic through the proxy.
+func (m *Manager) proxyInPath() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.trafficOn || m.metricsOn
 }
 
 // LLMRecordEnabled reports whether LLM request/response recording is on
@@ -743,15 +799,17 @@ func (m *Manager) PG() *pgdb.DB              { return m.pg }
 func (m *Manager) Traffic() *traffic.Traffic { return m.traffic }
 
 // ProxyAddr returns the egress proxy address agents route target traffic through:
-//   - capture ON  → the recording MITM proxy (which itself exits via the global
-//     proxy when one is set); agents also get its CA (see ProxyCACert).
-//   - capture OFF → the global egress proxy directly (empty CA — real target
-//     certs), or "" when no global proxy is set (direct, no recording).
+//   - capture ON or metrics-only ON → the recording MITM proxy (which itself exits
+//     via the global proxy when one is set); agents also get its CA (see
+//     ProxyCACert). Metrics-only differs from capture only in that it stores no
+//     bodies; both see every exchange, so WAF blocks are counted the same way.
+//   - both OFF → the global egress proxy directly (empty CA, real target certs),
+//     or "" when no global proxy is set (direct, no recording).
 //
-// So the global proxy takes effect in both modes: at the MITM's upstream when
-// capturing, in the agent's own bash env / WebFetch when not.
+// So the global proxy takes effect in both modes: at the MITM's upstream when the
+// proxy is in path, in the agent's own bash env / WebFetch when not.
 func (m *Manager) ProxyAddr() string {
-	if m.traffic != nil && m.TrafficEnabled() {
+	if m.traffic != nil && m.proxyInPath() {
 		return m.traffic.ProxyAddr()
 	}
 	m.mu.RLock()
@@ -760,12 +818,14 @@ func (m *Manager) ProxyAddr() string {
 }
 
 // ProxyCACert returns the CA cert path agents must trust to verify HTTPS through
-// the egress proxy. Non-empty ONLY when traffic capture is on (the MITM re-signs
-// certs): the global proxy used directly (capture off) is a plain forwarder that
-// preserves real target certs, so no custom CA is needed there. Its emptiness is
-// also the worker's "recording off" signal (see workerSystem).
+// the egress proxy. Non-empty whenever the MITM is in the agents' path (capture or
+// metrics-only on): the MITM re-signs certs in both modes, so agents need its CA
+// either way. The global proxy used directly (both modes off) is a plain forwarder
+// that preserves real target certs, so no custom CA is needed there. The worker's
+// "traffic tools exist" signal is tracked separately (SetTrafficTools), since
+// metrics-only presents a CA but registers no traffic tools.
 func (m *Manager) ProxyCACert() string {
-	if m.traffic == nil || !m.TrafficEnabled() {
+	if m.traffic == nil || !m.proxyInPath() {
 		return ""
 	}
 	return m.traffic.CACertPath()

@@ -570,6 +570,9 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)     // Experimental noa compaction: platform-level flag read once per run.
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
 	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	// Traffic tools exist only under full capture; metrics-only mode presents a proxy
+	// CA but registers none, so gate the worker's traffic-tool note on capture alone.
+	wk.SetTrafficTools(s.m.TrafficEnabled())
 	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInject(s.constraintInjectWorker) // Inject operation constraints into workers; configurable and enabled by default.
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
