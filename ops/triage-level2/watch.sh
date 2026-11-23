@@ -3,11 +3,22 @@
 # Read only against ARTEX. It never writes to ARTEX and never decides anything.
 # A finding is queued once: ids already logged in inbox.log are never repeated.
 #
+# Usage:
+#   ./watch.sh          poll forever, sleeping INTERVAL between polls (default)
+#   ./watch.sh --once   poll exactly once and exit 0, for a systemd oneshot unit
+#
 # Moved here from the bugbounty tree on 2026-11-23. The code lives in this repository;
 # the queue it writes stays in the bug bounty tree, because program data is not product
 # data. Every path below is overridable from the environment, and the defaults are the
 # paths that were in use before the move, so the behavior is unchanged.
 set -u
+
+MODE=loop
+case "${1:-}" in
+  --once) MODE=once ;;
+  "")     MODE=loop ;;
+  *)      printf 'usage: %s [--once]\n' "$0" >&2; exit 2 ;;
+esac
 
 # Code and data are deliberately separate. Override for a test run.
 BASE="${WATCH_BASE:-/home/cowboy/bugbounty}"
@@ -26,7 +37,11 @@ known_ids() {
   [ -s "$LOG" ] && sed -n 's/.*[[:space:]]id=\([0-9][0-9]*\)[[:space:]].*/\1/p' "$LOG"
 }
 
-while :; do
+# One poll. Returns 0 whether or not the query produced rows, so a oneshot unit is not
+# marked failed while the database is away. The failure is recorded in the log instead;
+# telling an outage apart from an empty table is TICKET-002.
+poll_once() {
+  local rows known ts
   rows=$(docker exec "$PG" psql -U artex -d artex -At -F '|' -c "
     SELECT id,
            coalesce(task_id::text, '-'),
@@ -38,8 +53,7 @@ while :; do
 
   if [ -z "$rows" ]; then
     printf '%s\tERROR\tARTEX query returned nothing\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOG"
-    sleep "$INTERVAL"
-    continue
+    return 0
   fi
 
   known=$(known_ids | sort -u)
@@ -55,5 +69,15 @@ while :; do
       "$ts" "$id" "$task" "$sev" "$status" "$name" >> "$LOG"
   done
 
+  return 0
+}
+
+if [ "$MODE" = once ]; then
+  poll_once
+  exit 0
+fi
+
+while :; do
+  poll_once
   sleep "$INTERVAL"
 done

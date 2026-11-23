@@ -1,0 +1,13 @@
+[Unit]
+Description=Level 2 ARTEX watcher timer, every 10 minutes
+Documentation=file:///home/cowboy/bugbounty/src/scopeweaver/ops/triage-level2/README.md
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=600
+AccuracySec=30s
+Persistent=true
+Unit=artex-level2-watch.service
+
+[Install]
+WantedBy=timers.target

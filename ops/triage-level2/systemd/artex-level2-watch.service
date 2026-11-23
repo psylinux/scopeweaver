@@ -1,0 +1,13 @@
+[Unit]
+Description=Level 2 ARTEX watcher: queue findings with no verdict
+Documentation=file:///home/cowboy/bugbounty/src/scopeweaver/ops/triage-level2/README.md
+After=docker.service
+
+[Service]
+Type=oneshot
+User=cowboy
+Group=cowboy
+WorkingDirectory=/home/cowboy/bugbounty/src/scopeweaver/ops/triage-level2
+ExecStart=/home/cowboy/bugbounty/src/scopeweaver/ops/triage-level2/watch.sh --once
+TimeoutStartSec=300
+Nice=10
