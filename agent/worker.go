@@ -59,6 +59,7 @@ type Worker struct {
 	workDir         string
 	proxyAddr       string
 	proxyCACert     string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
+	trafficTools    bool              // whether the traffic_* tools exist (full capture on); gates the [B] note
 	webSearch       WebSearchOpts     // web_search tool backend selection (off by default)
 	tx              *transcript.Store // raw LLM conversation persistence (nil = off)
 	window          int               // context window in tokens (for compaction)
@@ -189,6 +190,12 @@ func (w *Worker) compactionWindow() int {
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
 
+// SetTrafficTools records whether the traffic_* tools are registered for this
+// worker (true only when full capture is on). It gates the traffic-tools note in
+// the system prompt separately from the CA cert, because metrics-only mode routes
+// traffic through the MITM (so a CA is present) without storing anything to search.
+func (w *Worker) SetTrafficTools(on bool) { w.trafficTools = on }
+
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 
@@ -273,12 +280,14 @@ func ensureRunDir(base string, taskID, intentID int64) string {
 // cmdOutDir is the SDK large-tool-output spill dir under an agent's run dir.
 func cmdOutDir(dir string) string { return filepath.Join(dir, "cmd-output") }
 
-func workerSystem(proxyAddr, caCert, dataDir, runDir string, langs ...locale.Lang) string {
+func workerSystem(proxyAddr string, trafficTools bool, dataDir, runDir string, langs ...locale.Lang) string {
 	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()}, langs...)
-	// caCert is present only when the recording MITM is on, which is exactly when
-	// the traffic_* tools are registered — so it gates the traffic-tool note.
-	// Optional finding guidance is added for every role after tool resolution.
-	return body + workerTrafficBlock(caCert != "", langs...) + workerArtifactSpec(runDir, langs...)
+	// trafficTools gates the traffic-tool note: it is true only when full capture is
+	// on, which is exactly when the traffic_* tools are registered. It is tracked
+	// separately from the CA cert because metrics-only mode routes traffic through
+	// the MITM (so a CA is present) without persisting anything the tools could
+	// search. Optional finding guidance is added for every role after tool resolution.
+	return body + workerTrafficBlock(trafficTools, langs...) + workerArtifactSpec(runDir, langs...)
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -381,7 +390,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
-	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir, locale.FromContext(ctx))
+	sysBody := workerSystem(w.proxyAddr, w.trafficTools, w.workDir, runDir, locale.FromContext(ctx))
 	if w.wantConstraints() {
 		sysBody += constraintBlock(ts, locale.FromContext(ctx)) // Inject operating constraints for strict worker compliance.
 	}

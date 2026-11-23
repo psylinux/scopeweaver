@@ -32,6 +32,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/metrics"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
@@ -171,6 +172,12 @@ type Traffic struct {
 	// transparent-passthrough paths honor it (go-mitmproxy's getUpstreamConn),
 	// so no host escapes it. Hot-swappable at runtime via SetUpstreamProxy.
 	upstream atomic.Pointer[url.URL]
+	// persist gates full-exchange persistence in the addon response path. Open sets
+	// it true so a directly opened Traffic records as before; the server lowers it
+	// for metrics-only mode, where the proxy stays in the agents' egress path and
+	// keeps counting WAF blocks but writes no bodies/headers to the SQLite index.
+	// It does not gate the direct record() call used by tests and recovery.
+	persist atomic.Bool
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -197,6 +204,9 @@ func Open(dir, addr string) (*Traffic, error) {
 		return nil, err
 	}
 	t := &Traffic{dir: dir, addr: addr, db: db, closed: make(chan struct{})}
+	// Persist by default so a directly opened Traffic behaves exactly as before.
+	// Metrics-only mode is opt-in: the server lowers this via SetPersist.
+	t.persist.Store(true)
 	if err := t.initIndex(); err != nil {
 		db.Close()
 		return nil, err
@@ -227,10 +237,16 @@ func Open(dir, addr string) (*Traffic, error) {
 		_, tunnel := t.pass.Load(hostOnly(req.Host))
 		return !tunnel
 	})
-	p.AddAddon(&sink{t: t})
+	p.AddAddon(&sink{t: t, reg: metrics.Default})
 	t.proxy = p
 	return t, nil
 }
+
+// SetPersist controls whether the addon response path writes completed exchanges to
+// the index. WAF-block counting (see sink.Response) is independent of this, so a
+// metrics-only deployment turns persistence off and still charts blocks while the
+// recording proxy stays in the agents' egress path. Default true (set in Open).
+func (t *Traffic) SetPersist(on bool) { t.persist.Store(on) }
 
 // initIndex applies the schema on a single pinned connection. Pinning is what
 // makes auto_vacuum reliable: it can only be set while the database still holds
@@ -388,13 +404,28 @@ func (t *Traffic) DB() *sql.DB { return t.db }
 type sink struct {
 	mproxy.BaseAddon
 	t *Traffic
+	// reg counts observed responses and WAF blocks for every exchange the proxy
+	// sees, independent of persistence. Nil falls back to the process-wide registry.
+	reg *metrics.Registry
 }
 
+// Response fires for every completed exchange the proxy intercepts. It always
+// classifies and counts the response (cheap, stores nothing) so WAF-block metrics
+// exist whenever the proxy is in the agents' egress path, then persists the full
+// exchange only when capture persistence is enabled. Metrics-only mode keeps the
+// counting and skips the persistence.
 func (s *sink) Response(f *mproxy.Flow) {
 	if f.Request == nil || f.Response == nil {
 		return
 	}
-	s.t.record(f)
+	reg := s.reg
+	if reg == nil {
+		reg = metrics.Default
+	}
+	reg.Observe(f.Response.StatusCode, f.Response.Header, f.Response.Body)
+	if s.t.persist.Load() {
+		s.t.record(f)
+	}
 }
 
 // RequestError fires when a request through an established MITM tunnel fails. If
