@@ -110,7 +110,10 @@ type registryFile struct {
 }
 
 // parseRegistryAliases reads the canonical-to-aliases map from the registry. A
-// missing or malformed file yields an empty map (no alias fallback).
+// missing file yields an empty map (no alias fallback). A file that fails strict
+// YAML parsing falls back to a line scan, so one malformed line in this shared,
+// concurrently edited file costs at most its own entry's aliases instead of
+// every alias.
 func parseRegistryAliases(path string) map[string][]string {
 	out := map[string][]string{}
 	if path == "" {
@@ -121,12 +124,43 @@ func parseRegistryAliases(path string) map[string][]string {
 		return out
 	}
 	var rf registryFile
-	if err := yaml.Unmarshal(b, &rf); err != nil {
+	if err := yaml.Unmarshal(b, &rf); err == nil {
+		for name, entry := range rf.Entries {
+			if len(entry.Aliases) > 0 {
+				out[name] = entry.Aliases
+			}
+		}
 		return out
 	}
-	for name, entry := range rf.Entries {
-		if len(entry.Aliases) > 0 {
-			out[name] = entry.Aliases
+	return scanRegistryAliases(b)
+}
+
+// aliasLineRe recovers "NAME: {... aliases: [a, b, ...] ...}" from a single
+// registry line. The name is UPPER_SNAKE_CASE; the aliases are the bracketed,
+// comma-separated list that follows the aliases key on the same line.
+var aliasLineRe = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9_]*)\s*:.*\baliases:\s*\[([^\]]*)\]`)
+
+// scanRegistryAliases extracts aliases line by line when the registry does not
+// parse as strict YAML. A line without an aliases list contributes nothing, so a
+// malformed line simply yields no aliases for its entry rather than aborting the
+// whole file.
+func scanRegistryAliases(b []byte) map[string][]string {
+	out := map[string][]string{}
+	for _, line := range strings.Split(string(b), "\n") {
+		m := aliasLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		var aliases []string
+		for _, part := range strings.Split(m[2], ",") {
+			a := strings.TrimSpace(part)
+			a = strings.Trim(a, `"'`)
+			if a != "" {
+				aliases = append(aliases, a)
+			}
+		}
+		if len(aliases) > 0 {
+			out[m[1]] = aliases
 		}
 	}
 	return out

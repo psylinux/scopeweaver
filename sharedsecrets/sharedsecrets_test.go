@@ -73,6 +73,25 @@ OPENAI_API_KEY: "from-alias"
 	}
 }
 
+func TestMalformedRegistryStillRecoversAliases(t *testing.T) {
+	dir := t.TempDir()
+	// The second line is invalid YAML (no space after the colon, as seen in the
+	// shared registry): strict parsing of the whole file fails, so the line scan
+	// must still recover the OPENAI_API_TOKEN aliases from the good line.
+	reg := writeFile(t, dir, "registry.yaml", `version: 1
+entries:
+  SOME_DIR:{kind: dir, used_by: [mcp-recon]}
+  OPENAI_API_TOKEN: {kind: api_token, aliases: [OPENAI_API_KEY], used_by: [scopeweaver]}
+`)
+	sec := writeFile(t, dir, "secrets.yaml", `version: 1
+OPENAI_API_KEY: "from-legacy-alias"
+`)
+	s := LoadFrom(sec, reg)
+	if got := s.Get("OPENAI_API_TOKEN"); got != "from-legacy-alias" {
+		t.Fatalf("alias recovery after malformed registry: got %q", got)
+	}
+}
+
 func TestValuePrefersEnvOverride(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, registryBasename, sampleRegistry)
