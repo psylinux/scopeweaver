@@ -54,7 +54,7 @@ resolves these names.
 - [x] handles forwarded / nested MIME (message/rfc822), HTML-only mail, and multipart/alternative where the code lives only in the HTML part - keeps BOTH the plain and the tag-stripped HTML text (drops `<style>`/`<script>` noise, preserves href links), so no code is lost
 - [x] `go build ./...` green; `go vet ./cmd/mailotp` and `go test ./cmd/mailotp` green (full `go test ./...` needs the DB harness and was not run here)
 - [x] `mailotp` on PATH in the live container - interim volume deploy (`docker cp` to `/app/data/bin/mailotp`, `/usr/local/bin/mailotp` symlink); skill copied to `/app/skills/email-otp/`, visible to worker/auto/pentest
-- [ ] reproducible deploy: build `mailotp` into the image via Dockerfile + Ansible (replaces the interim volume copy)
+- [x] reproducible deploy wired: `mailotp` is built and shipped on PATH (`/usr/local/bin/mailotp`) in `Dockerfile.hardened` (the image Ansible builds) and the stock `Dockerfile`; recon-server Ansible `scopeweaver_image` bumped to `0.1.0-authfix.6` so the next image build bakes it in (replaces the interim `/app/data/bin` volume copy)
 - [ ] the 10 task descriptions updated (post-deploy): drop the alias clause, add the "Accounts and email" block below (note: task descriptions are read-only via API/UI; on task 14 this was injected as a new open objective instead - see Log)
 - [ ] PR opened; ticket set to `Feedback`
 

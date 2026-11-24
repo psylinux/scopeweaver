@@ -18,6 +18,9 @@ COPY . .
 COPY --from=frontend /src/web/out/ ./server/webui/dist/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -tags embedui -trimpath \
     -ldflags "-s -w -X main.version=${VERSION}" -o /scopeweaver ./cmd/artex
+# mailotp: reads a controlled sign-up mailbox over IMAP for the email-otp skill.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+    -ldflags "-s -w" -o /mailotp ./cmd/mailotp
 
 FROM python:3.12-slim-bookworm
 # Runtime tools and Node 20 for Playwright. Browser installation occurs at build time.
@@ -33,9 +36,10 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend /scopeweaver /app/scopeweaver
+COPY --from=backend /mailotp /usr/local/bin/mailotp
 # The supervisor forwards SIGTERM and restarts after a self-update.
 COPY start.sh /app/start.sh
-RUN chmod +x /app/scopeweaver /app/start.sh
+RUN chmod +x /app/scopeweaver /app/start.sh /usr/local/bin/mailotp
 COPY skills/ /app/skills/
 COPY LICENSE /app/LICENSE
 VOLUME ["/app/data"]
