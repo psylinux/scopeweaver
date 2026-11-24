@@ -32,27 +32,34 @@ shared pool breaks down:
 ## Operator's intent
 
 The OTP side should behave like an **email client**: one component polls the
-mailboxes on an interval, keeps a durable record of every message, and makes them
-available so that **each agent serves itself** - it goes in, finds the message it
-is looking for, and takes it - preferably through a **well-defined, structured API**.
-Clear, scalable, and free of the concurrency problem above.
+mailboxes **as mail arrives** and keeps every message **available locally inside the
+container**, so that **each agent serves itself** - it queries the local corpus
+**however it wants** (by subject, body, sender, recipient, time, ...) through a
+**well-defined, structured API** and takes the message it is looking for. Agents
+never talk to Gmail themselves: if every agent kept polling IMAP we would hit
+Gmail's connection limit fast; only the service connects, once and continuously,
+and everything the agents do is a local read. Clear, scalable, and free of the
+concurrency problem above.
 
 ## Decisions (locked 2026-11-24, operator)
 
-- **Agent interface:** a thin CLI over a local **unix socket**. Agents keep `mailotp alloc` / `mailotp fetch`; the binary becomes a client of the `mailotp serve` daemon. No HTTP endpoint or MCP tool for now.
+- **Agent interface:** a thin CLI over a local **unix socket**. Agents use `mailotp query` / `fetch` / `alloc` against the `mailotp serve` daemon; the binary is just a thin client (it never opens IMAP). No HTTP endpoint or MCP tool for now.
 - **Store:** **SQLite** on the data volume (`/app/data`), decoupled from the `artex` Postgres; survives a container recreate.
 - **Deployment:** **sidecar** process inside the scopeweaver container, started and supervised by `start.sh` alongside the app (one IMAP talker per host).
 - **Address strategy:** `+tag` subaddressing primary; the fallback for sites that reject `+` is **mailbox leasing** (exclusive lease of a whole mailbox to one agent for the sign-up window). Grow capacity by adding Gmail accounts; no catch-all domain for now.
 
 ## Concrete design (Fase 1 = MVP)
 
-**Daemon + client.** `mailotp serve` listens on a unix socket under the data volume (e.g. `/app/data/mailotp/mailotp.sock`). The CLI talks to it:
-- `mailotp alloc --mailbox 01 [--ttl 15m] [--no-plus]` -> prints a tagged address (`...test01+<tag>@gmail.com`) and a `handle`; `--no-plus` instead leases the whole mailbox and returns the bare address (for sites that reject `+`).
-- `mailotp fetch --handle <h> [--wait 90] [--from s] [--subject s]` -> blocks until the message matched to that handle is in the store (or timeout), then prints From/To/Date/Subject + decoded body (same format and HTML handling as today).
+**Daemon + client.** `mailotp serve` runs the continuous sync and owns the store; it listens on a unix socket under the data volume (e.g. `/app/data/mailotp/mailotp.sock`). Everything the agents do is a **local read against the synced corpus** - no agent ever opens IMAP. The CLI (thin client) talks to the socket:
+- `mailotp query [--mailbox NN] [--from s] [--to s] [--subject s] [--body s] [--since 15m] [--limit N] [--json]` -> **the primary command**: searches the local corpus however the agent wants and returns the matching messages (From/To/Date/Subject + decoded body, newest first). Pure local read; returns immediately.
+- `mailotp fetch [same filters] [--wait 90]` -> the same search but **waits** up to `--wait` for a match to appear (for "I just triggered a sign-up, now wait for the code"). It is `query` + block-until-present.
+- `mailotp alloc --mailbox 01 [--ttl 15m] [--no-plus]` -> for guaranteed isolation on a shared mailbox: returns a unique tagged address (`...test01+<tag>@gmail.com`) and a `handle`; the agent signs up with it, then `query`/`fetch --to +<tag>` reads exactly its own message. `--no-plus` leases the whole mailbox and returns the bare address (sites that reject `+`).
 - `mailotp release --handle <h>` -> frees the allocation and any mailbox lease.
-- `mailotp mailboxes` and `mailotp fetch --mailbox NN` kept, served from the store, for back-compat.
+- `mailotp mailboxes`, and `mailotp fetch --mailbox NN` for back-compat.
 
-**Store (SQLite).** `messages(mailbox, uid, message_id, from_addr, to_addr, delivered_to, subject, date, body, ingested_at)` (unique `(mailbox, uid)` and `message_id` for idempotent ingest); `allocations(handle, mailbox, tag, address, task, intent, agent, state, ttl, created_at, matched_message_id)`; `leases(mailbox, handle, state, acquired_at, ttl)`.
+**Attribution vs. free search (trade-off to keep in mind).** Free `query` by subject/body is flexible, but on a *shared* mailbox under concurrency two agents searching the same site's mail can match the same message. Free search is fine when that ambiguity does not matter (distinct senders/subjects, low concurrency); when a sign-up must be unambiguous, the agent uses `alloc` + its `+tag` so the message is keyed to it. The skill steers agents to `+tag` for sign-ups and leaves free `query` for everything else.
+
+**Store (SQLite).** `messages(mailbox, uid, message_id, from_addr, to_addr, delivered_to, subject, date, body, ingested_at)` (unique `(mailbox, uid)` and `message_id` for idempotent ingest); `allocations(handle, mailbox, tag, address, task, intent, agent, state, ttl, created_at, matched_message_id)`; `leases(mailbox, handle, state, acquired_at, ttl)`. `query` filters map to indexed columns (from/to/subject/date/mailbox) plus a `--body` LIKE; add an FTS5 index if body search needs to scale.
 
 **Poller.** One goroutine per mailbox; persistent IMAP with IDLE when available, else poll ~15s; tracks `UIDVALIDITY` + last UID; ingests **INBOX and Spam**; read-only (never marks read / deletes); matches each new message's `Delivered-To`/`To` tag to an open allocation.
 
@@ -67,10 +74,10 @@ Clear, scalable, and free of the concurrency problem above.
 
 ## Scope (files likely to change)
 
-- `cmd/mailotp/` - add `serve` (poller + store + API) and `alloc`; make `fetch` a
-  client of the service.
-- `skills/email-otp/SKILL.md` - teach alloc -> sign up with the tagged address ->
-  fetch by handle.
+- `cmd/mailotp/` - add `serve` (continuous sync + store + socket API), `query`, and
+  `alloc`; make `fetch` a client (query + wait) of the service.
+- `skills/email-otp/SKILL.md` - teach: query the local corpus by subject/body/from/
+  etc; for a sign-up, alloc a `+tag` address and read your own message by it.
 - `Dockerfile.hardened` / `start.sh` - run `mailotp serve` alongside the app.
 - recon-server `ansible/roles/scopeweaver` - image tag bump + any service wiring.
 
@@ -80,8 +87,9 @@ Clear, scalable, and free of the concurrency problem above.
       their own OTP (verified with a concurrency test).
 - [ ] No per-agent IMAP connection: only the service talks to Gmail.
 - [ ] Durable store survives a container recreate; re-reads are idempotent.
-- [ ] `alloc` + `fetch --handle` documented in the skill; `fetch --mailbox NN`
-      still works.
+- [ ] agents query the local corpus by subject/body/from/to/time via the socket
+      API (no IMAP from agents); `alloc` + `+tag` gives guaranteed isolation;
+      `fetch --mailbox NN` still works.
 - [ ] Reproducible deploy (image + Ansible), ticket/PR/gate flow.
 
 ## Relation
