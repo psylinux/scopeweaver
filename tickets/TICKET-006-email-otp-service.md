@@ -114,12 +114,26 @@ concurrency problem above.
     ~2s (01 INBOX 15, 02 INBOX 13 + Spam 2), captured live Amazon OTP sign-ups
     with the `+tag` preserved in the To header, `alloc`/`fetch --handle`/`release`
     all worked, socket cleaned up on SIGTERM.
+- **2026-11-24 - Observability + durability (operator requirements).**
+  `mailotp serve` now exposes a Prometheus `/metrics` endpoint (`--metrics-addr`,
+  default `:9469`): messages ingested (per mailbox/folder), messages stored, read
+  totals attributed per agent (`--agent` / `$MAILOTP_AGENT` / `$ARTEX_TASK_ID`),
+  the open-allocation/verification queue, a fetch-wait histogram, poller up/down,
+  IMAP reconnects and poll errors (plus Go/process metrics). This HTTP endpoint is
+  the operator monitoring plane only; the agent interface stays the unix socket.
+  A ready-to-apply scrape job and a Grafana dashboard (uid `mailotp`, matching the
+  artex dashboard conventions) are staged in the repo under `monitoring/`. Live
+  smoke confirmed the endpoint and the per-agent attribution. **SQLite durability
+  confirmed:** the store at `/app/data/mailotp/store.db` sits on the `sw_data`
+  named volume (same model as the artex Postgres), so it survives a recreate.
 - **Remaining (deploy wiring, pending operator go-ahead for the live cutover):**
   run `mailotp serve` as a sidecar from `start.sh`, build it into the scopeweaver
   image, bump the recon-server Ansible role, update the `email-otp` skill to steer
-  agents to `alloc`/`query`/`fetch --handle`, then pause/recreate/resume the live
-  container (postgres untouched). This changes the runtime topology (a new daemon
-  holding persistent IMAP connections), so it is staged separately from the code.
+  agents to `alloc`/`query`/`fetch --handle`, wire the `monitoring/` scrape job and
+  Grafana dashboard into services/monitoring (+ Ansible), then pause/recreate/
+  resume the live container (postgres untouched). This changes the runtime
+  topology (a new daemon holding persistent IMAP connections), so it is staged
+  separately from the code.
 
 ## Relation
 
