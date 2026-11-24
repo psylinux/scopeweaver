@@ -54,3 +54,9 @@ Parent: TICKET-006. Blocked by TICKET-007 (the daemon must be live and exposing
   scopeweaver-local-scopeweaver-1:9469), and `mailotp_poller_up` (01=1, 02=1) and
   `mailotp_messages_stored` (01=20, 02=15) are queryable. Status Feedback.
 - 2026-11-24: confirmed end-to-end via the Grafana dashboard (live data); operator marked Done.
+- 2026-11-24: follow-up (authfix.9) - reads are now auto-attributed to the task id
+  parsed from the agent working dir (/app/data/tasks/<id>/...), so
+  `mailotp_reads_total` / `mailotp_messages_returned_total` carry a real `agent`
+  label without the agent passing `--agent`. Verified: a query from
+  /app/data/tasks/999/itest produced `agent="task999"`. Also removed the stale
+  interim /app/data/bin copies.
