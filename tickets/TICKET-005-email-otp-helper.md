@@ -1,7 +1,7 @@
 ---
 id: TICKET-005
 title: "Email OTP helper: read sign-up codes/links from ARTEX mailboxes"
-status: WIP          # New | To-Do | WIP | Feedback | Done
+status: Done         # New | To-Do | WIP | Feedback | Done
 area: agent, skills, ops
 priority: medium
 blocked_by: none
@@ -108,3 +108,7 @@ and add to the conduct:
 - 2026-11-24: fixed (1) - `extractBody` now keeps both the plain and the tag-stripped HTML parts and drops `<style>`/`<script>` noise (so CSS cannot bury or truncate the code); added regression test `TestExtractBodyCodeOnlyInHTML`. Rebuilt and redeployed the interim binary; verified live against a real multipart email in mailbox 01 (both parts printed, CSS gone). (2) is an environment limitation (datacenter-IP WAF reputation), not a helper bug.
 - 2026-11-24: baked `mailotp` into the image (Dockerfile.hardened + stock Dockerfile, `/usr/local/bin/mailotp`); recon-server Ansible bumped to authfix.6; merged ticket-005 into `v0.1.0-authfix` (0c187ac) and deployed by image rebuild + container recreate (pause active tasks, `compose up -d`, resume). The 9 signal-batch tasks that still carried the alias in their read-only descriptions (13, 15-22) were each given an injected objective steering them to mailboxes 01/02.
 - 2026-11-24: concurrency interim win shipped - `--to` filter (matches `To`, where Gmail keeps the `+tag`) + `+tag` convention in the skill; shows `To:` in output and JSON. Verified live. Full sync-service solution opened as TICKET-006.
+- 2026-11-24: Done (closed by operator). The helper and its interim wins were
+  delivered and ran live (authfix.6/7). Superseded by the serve model (the
+  TICKET-006 epic, 007-010, image authfix.8): the one-shot reader is now the
+  `fetch --mailbox NN` / `--direct` fallback behind the `mailotp serve` daemon.
