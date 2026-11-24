@@ -140,6 +140,12 @@ concurrency problem above.
     TICKET-007).
 
   This ticket stays WIP until 007-010 land; the service code itself is done.
+- **2026-11-24 - the service is LIVE.** TICKET-007 + TICKET-010 deployed: image
+  `authfix.8`, the `mailotp serve` sidecar runs in the live container, syncs
+  mailboxes 01/02 (INBOX+Spam) into the SQLite corpus on `sw_data`, and agents use
+  it over the socket (`alloc`/`query`/`fetch --handle` verified live). Metrics on
+  `:9469`. Remaining: TICKET-008 (Prometheus scrape) and TICKET-009 (Grafana
+  dashboard) to light up the operator view; both now actionable.
 
 ## Relation
 

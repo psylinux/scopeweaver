@@ -1,13 +1,13 @@
 ---
 id: TICKET-007
 title: "Deploy mailotp serve as a sidecar in the scopeweaver stack"
-status: WIP          # New | To-Do | WIP | Feedback | Done
+status: Feedback     # New | To-Do | WIP | Feedback | Done
 area: ops, agent
 priority: high
 blocked_by: none
 owner: psylinux
 branch: v0.1.0-authfix
-pr: none
+pr: none (direct to v0.1.0-authfix, the live-build branch; deployed and verified)
 source: operator request (split the pending TICKET-006 Fase 1b deploy items into their own tickets, 2026-11-24)
 ---
 
@@ -128,3 +128,15 @@ source (cmd/mailotp sync vs private module).
 
 - 2026-11-24: filed (New), split from TICKET-006; awaits operator go-ahead for the live cutover.
 - 2026-11-24: operator confirmed build source Option A (sync into cmd/mailotp). Only the go-ahead for the live cutover remains.
+- 2026-11-24: implemented (Option A) and DEPLOYED. Synced sources into cmd/mailotp
+  via scripts/sync-mailotp.sh; go build ./... and go test ./cmd/mailotp green;
+  start.sh runs the serve sidecar; image built as authfix.8; scopeweaver
+  v0.1.0-authfix at 6b232d2; recon-server defaults bumped (4a2a248). Cutover:
+  paused 13/15/16, `docker compose up -d` recreated the container (postgres +
+  sw_data untouched), resumed exactly 13/15/16. Verified live: container healthy,
+  serve sidecar up (pid 8), store+socket on /app/data/mailotp (sw_data), both
+  pollers synced (01=20, 02=15), /metrics serves 32 series on :9469, and an
+  agent-style alloc -> query --handle -> release worked in the container. Ships
+  with TICKET-010 (skill). Status Feedback: awaiting operator sign-off (no PR;
+  direct-to-branch deploy mode). TICKET-008/009 (Prometheus/Grafana wiring) are now
+  actionable (the daemon is live on :9469).
