@@ -1,7 +1,7 @@
 ---
 id: TICKET-006
 title: "Email OTP service: an email-client that syncs the mailboxes and serves each agent its own message via an API"
-status: New          # New | To-Do | WIP | Feedback | Done
+status: To-Do        # New | To-Do | WIP | Feedback | Done
 area: agent, skills, ops
 priority: high
 blocked_by: none
@@ -37,49 +37,33 @@ available so that **each agent serves itself** - it goes in, finds the message i
 is looking for, and takes it - preferably through a **well-defined, structured API**.
 Clear, scalable, and free of the concurrency problem above.
 
-## Proposed direction (to refine together)
+## Decisions (locked 2026-11-24, operator)
 
-1. **Attribution by unique address (not by guessing).** Each sign-up uses a unique
-   sub-address so its OTP is unambiguous. Gmail `+tag` subaddressing
-   (`psylinux.hackerone.test01+<tag>@gmail.com`) delivers to the same inbox and
-   keeps the `+tag` in the `To`/`Delivered-To` header; the agent fetches by its own
-   tag. Zero new infra, scales to unlimited addresses from the 2 accounts.
-   - Fallback for sites that reject `+`: lease a whole mailbox to one agent for the
-     duration of a sign-up (serialises; limited by pool size), or add more Gmail
-     accounts, or a catch-all domain for truly unlimited clean addresses.
-   - Interim step already shipped under TICKET-005: a `--to` filter (matches `To`)
-     plus the `+tag` convention documented in the skill.
+- **Agent interface:** a thin CLI over a local **unix socket**. Agents keep `mailotp alloc` / `mailotp fetch`; the binary becomes a client of the `mailotp serve` daemon. No HTTP endpoint or MCP tool for now.
+- **Store:** **SQLite** on the data volume (`/app/data`), decoupled from the `artex` Postgres; survives a container recreate.
+- **Deployment:** **sidecar** process inside the scopeweaver container, started and supervised by `start.sh` alongside the app (one IMAP talker per host).
+- **Address strategy:** `+tag` subaddressing primary; the fallback for sites that reject `+` is **mailbox leasing** (exclusive lease of a whole mailbox to one agent for the sign-up window). Grow capacity by adding Gmail accounts; no catch-all domain for now.
 
-2. **A mailbox-sync service (the email-client model).** Evolve `mailotp` into a
-   client/server:
-   - `mailotp serve`: one IMAP poller per account on an interval, writing into a
-     durable store (SQLite on the data volume keeps it decoupled from the `artex`
-     Postgres), indexed by recipient/`+tag`, `from`, `subject`, `date`,
-     `message-id`, and body. Read-only on the mailbox; never deletes.
-   - A small, well-defined local API (unix socket or `127.0.0.1`) the agents call
-     instead of opening IMAP themselves - this removes the per-agent IMAP
-     connections and the Gmail connection-limit risk.
-   - The CLI becomes a thin client: `mailotp alloc --mailbox 01` returns a tagged
-     address to sign up with; `mailotp fetch --handle <h>` (or `--to <addr>`)
-     returns exactly that request's message from the store.
-   - Keep `fetch --mailbox NN` working (served from the store) for back-compat.
-   - Optional later: expose the same API as an ARTEX MCP / custom tool.
+## Concrete design (Fase 1 = MVP)
 
-## Open design questions (the plan we will work on)
+**Daemon + client.** `mailotp serve` listens on a unix socket under the data volume (e.g. `/app/data/mailotp/mailotp.sock`). The CLI talks to it:
+- `mailotp alloc --mailbox 01 [--ttl 15m] [--no-plus]` -> prints a tagged address (`...test01+<tag>@gmail.com`) and a `handle`; `--no-plus` instead leases the whole mailbox and returns the bare address (for sites that reject `+`).
+- `mailotp fetch --handle <h> [--wait 90] [--from s] [--subject s]` -> blocks until the message matched to that handle is in the store (or timeout), then prints From/To/Date/Subject + decoded body (same format and HTML handling as today).
+- `mailotp release --handle <h>` -> frees the allocation and any mailbox lease.
+- `mailotp mailboxes` and `mailotp fetch --mailbox NN` kept, served from the store, for back-compat.
 
-- API surface and transport: exact endpoints, request/response shapes, auth,
-  unix-socket vs loopback HTTP vs MCP tool; how an agent discovers the service.
-- Allocation/claim semantics: how `alloc` issues tags, TTLs, whether a message is
-  "claimed" so two agents never take the same one, how retries/re-reads behave.
-- Store: schema, retention/cleanup, whether SQLite or a dedicated Postgres schema,
-  how it survives container recreates (data volume).
-- Poller: interval, backoff, Gmail rate/connection budget, which folders (INBOX +
-  Spam?), handling of multi-account pools and future accounts/catch-all domain.
-- Lifecycle/deploy: where `serve` runs (sidecar process in the scopeweaver
-  container via start.sh, or its own container), health, restart, and how the
-  Ansible role manages it.
-- Address strategy: `+tag` vs catch-all domain vs per-mailbox leasing, and how the
-  skill instructs agents to choose and to fall back when `+` is rejected.
+**Store (SQLite).** `messages(mailbox, uid, message_id, from_addr, to_addr, delivered_to, subject, date, body, ingested_at)` (unique `(mailbox, uid)` and `message_id` for idempotent ingest); `allocations(handle, mailbox, tag, address, task, intent, agent, state, ttl, created_at, matched_message_id)`; `leases(mailbox, handle, state, acquired_at, ttl)`.
+
+**Poller.** One goroutine per mailbox; persistent IMAP with IDLE when available, else poll ~15s; tracks `UIDVALIDITY` + last UID; ingests **INBOX and Spam**; read-only (never marks read / deletes); matches each new message's `Delivered-To`/`To` tag to an open allocation.
+
+**Supervision.** `start.sh` launches `mailotp serve` in the background and restarts it on exit; the daemon reads creds from the mounted `secrets.yaml` (so the raw App Password still never reaches the agent).
+
+## Defaults I will set (not blocking; recorded here)
+
+- Poll ~15s + IMAP IDLE; folders INBOX + Spam.
+- Allocation/lease TTL 15 min; released on `release` or expiry.
+- Claim: a matched message is bound to its allocation; `fetch` is idempotent/re-readable; one allocation resolves to one message (newest matching if several).
+- Retention: prune messages after 7 days; keep allocations 7 days for audit.
 
 ## Scope (files likely to change)
 
