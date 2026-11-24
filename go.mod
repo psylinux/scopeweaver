@@ -4,6 +4,8 @@ go 1.26.3
 
 require (
 	github.com/Autumn-27/norma v0.4.3
+	github.com/emersion/go-imap v1.2.1
+	github.com/emersion/go-message v0.18.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
@@ -24,6 +26,7 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/emersion/go-sasl v0.0.0-20200509203442-7bfe0ed36a21 // indirect
 	github.com/gaissmai/bart v0.26.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/gorilla/css v1.0.1 // indirect

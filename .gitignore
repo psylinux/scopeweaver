@@ -63,3 +63,6 @@ Thumbs.db
 /scopeweaver.old
 /scopeweaver.failed
 /scopeweaver.upgrade.json
+
+# stray go build output of ./cmd/mailotp
+/mailotp
