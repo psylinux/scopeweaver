@@ -1,12 +1,12 @@
 ---
 id: TICKET-006
 title: "Email OTP service: an email-client that syncs the mailboxes and serves each agent its own message via an API"
-status: To-Do        # New | To-Do | WIP | Feedback | Done
+status: WIP          # New | To-Do | WIP | Feedback | Done
 area: agent, skills, ops
 priority: high
 blocked_by: none
 owner: psylinux
-branch: none
+branch: psylinux/mailotp@main
 pr: none
 source: operator request (concurrency problem with the shared mailbox pool, raised 2026-11-24)
 ---
@@ -91,6 +91,35 @@ concurrency problem above.
       API (no IMAP from agents); `alloc` + `+tag` gives guaranteed isolation;
       `fetch --mailbox NN` still works.
 - [ ] Reproducible deploy (image + Ansible), ticket/PR/gate flow.
+
+## Implementation log
+
+- **2026-11-24 - Fase 1 code implemented and tested in the `psylinux/mailotp`
+  standalone repo (branch main).** The daemon + thin-client model is built:
+  - `mailotp serve` (serve.go): one poller goroutine per mailbox, persistent
+    read-only IMAP, polls every `--poll` (default 15s), ingests INBOX + Spam into
+    a SQLite corpus (store.go), tracks UIDVALIDITY + last UID, bounded first-sync
+    backfill, hourly prune, reconnect with capped backoff, graceful shutdown.
+  - Unix-socket protocol (proto.go), newline-delimited JSON, not HTTP/MCP.
+  - Clients (client_cmds.go): `query` (local corpus search by
+    mailbox/from/to/subject/body/since/limit), `fetch` (query + block until a
+    match or `--wait`), `alloc`/`release` (+tag address or `--no-plus` whole-
+    mailbox lease), `mailboxes`. `fetch --mailbox NN` falls back to a direct IMAP
+    read when the daemon is down, so nothing breaks during rollout.
+  - Pure-Go SQLite (modernc.org/sqlite), so `CGO_ENABLED=0` static build works.
+  - Tests green: store idempotency, filter/order, allocation + lease lifecycle,
+    sync-state, and the concurrent-signup isolation case (two +tag messages, each
+    read only via its own handle). Plus the existing body-extraction tests.
+  - **Live read-only smoke** against the real mailboxes: both pollers synced in
+    ~2s (01 INBOX 15, 02 INBOX 13 + Spam 2), captured live Amazon OTP sign-ups
+    with the `+tag` preserved in the To header, `alloc`/`fetch --handle`/`release`
+    all worked, socket cleaned up on SIGTERM.
+- **Remaining (deploy wiring, pending operator go-ahead for the live cutover):**
+  run `mailotp serve` as a sidecar from `start.sh`, build it into the scopeweaver
+  image, bump the recon-server Ansible role, update the `email-otp` skill to steer
+  agents to `alloc`/`query`/`fetch --handle`, then pause/recreate/resume the live
+  container (postgres untouched). This changes the runtime topology (a new daemon
+  holding persistent IMAP connections), so it is staged separately from the code.
 
 ## Relation
 
