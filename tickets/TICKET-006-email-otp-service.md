@@ -1,7 +1,7 @@
 ---
 id: TICKET-006
 title: "Email OTP service: an email-client that syncs the mailboxes and serves each agent its own message via an API"
-status: WIP          # New | To-Do | WIP | Feedback | Done
+status: Done         # New | To-Do | WIP | Feedback | Done
 area: agent, skills, ops
 priority: high
 blocked_by: none
@@ -146,6 +146,9 @@ concurrency problem above.
   it over the socket (`alloc`/`query`/`fetch --handle` verified live). Metrics on
   `:9469`. Remaining: TICKET-008 (Prometheus scrape) and TICKET-009 (Grafana
   dashboard) to light up the operator view; both now actionable.
+- **2026-11-24 - epic CLOSED.** 007-010 all Done: the service is live (image
+  authfix.8), observable in Prometheus and Grafana (dashboard verified rendering
+  live data in the browser). TICKET-006 Done.
 
 ## Relation
 

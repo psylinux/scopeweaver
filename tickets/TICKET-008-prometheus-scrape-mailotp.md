@@ -1,7 +1,7 @@
 ---
 id: TICKET-008
 title: "Wire the mailotp /metrics endpoint into Prometheus"
-status: Feedback     # New | To-Do | WIP | Feedback | Done
+status: Done         # New | To-Do | WIP | Feedback | Done
 area: ops, docs
 priority: medium
 blocked_by: none
@@ -53,3 +53,4 @@ Parent: TICKET-006. Blocked by TICKET-007 (the daemon must be live and exposing
   Prometheus (SIGHUP). Verified: target `job=mailotp` is up (scraping
   scopeweaver-local-scopeweaver-1:9469), and `mailotp_poller_up` (01=1, 02=1) and
   `mailotp_messages_stored` (01=20, 02=15) are queryable. Status Feedback.
+- 2026-11-24: confirmed end-to-end via the Grafana dashboard (live data); operator marked Done.
