@@ -1,12 +1,12 @@
 ---
 id: TICKET-008
 title: "Wire the mailotp /metrics endpoint into Prometheus"
-status: New          # New | To-Do | WIP | Feedback | Done
+status: Feedback     # New | To-Do | WIP | Feedback | Done
 area: ops, docs
 priority: medium
-blocked_by: TICKET-007
+blocked_by: none
 owner: psylinux
-branch: none
+branch: recon-server master + live services/monitoring
 pr: none
 source: operator request (one ticket per pending Fase 1b item, 2026-11-24)
 ---
@@ -48,3 +48,8 @@ Parent: TICKET-006. Blocked by TICKET-007 (the daemon must be live and exposing
 ## Log
 
 - 2026-11-24: filed (New), split from TICKET-006.
+- 2026-11-24: added the `mailotp` scrape job to prometheus.yml (live
+  services/monitoring + the recon-server monitoring role `files/`), reloaded
+  Prometheus (SIGHUP). Verified: target `job=mailotp` is up (scraping
+  scopeweaver-local-scopeweaver-1:9469), and `mailotp_poller_up` (01=1, 02=1) and
+  `mailotp_messages_stored` (01=20, 02=15) are queryable. Status Feedback.

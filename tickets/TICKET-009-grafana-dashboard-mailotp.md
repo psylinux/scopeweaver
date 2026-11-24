@@ -1,12 +1,12 @@
 ---
 id: TICKET-009
 title: "Provision the mailotp Grafana dashboard"
-status: New          # New | To-Do | WIP | Feedback | Done
+status: Feedback     # New | To-Do | WIP | Feedback | Done
 area: ops, docs
 priority: medium
-blocked_by: TICKET-008
+blocked_by: none
 owner: psylinux
-branch: none
+branch: recon-server master + live services/monitoring
 pr: none
 source: operator request (one ticket per pending Fase 1b item, 2026-11-24)
 ---
@@ -51,3 +51,7 @@ Prometheus data). The ready dashboard is staged at `psylinux/mailotp`
 ## Log
 
 - 2026-11-24: filed (New), split from TICKET-006.
+- 2026-11-24: dropped the dashboard (uid `mailotp`) into grafana/dashboards (live
+  services/monitoring + the recon-server monitoring role `files/`). Verified:
+  Grafana loaded it (search API returns title "mailotp (email OTP service)"),
+  rendering the TICKET-008 Prometheus data. Status Feedback.

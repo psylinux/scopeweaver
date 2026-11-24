@@ -1,7 +1,7 @@
 ---
 id: TICKET-010
 title: "Update the email-otp skill to the serve/query/alloc model"
-status: Feedback     # New | To-Do | WIP | Feedback | Done
+status: Done         # New | To-Do | WIP | Feedback | Done
 area: agent, skills
 priority: high
 blocked_by: none
@@ -53,3 +53,4 @@ it documents are in `psylinux/mailotp` (cross-repo reference).
   per-signup isolation, query for search, fetch --mailbox NN direct fallback kept);
   shipped in image authfix.8 with TICKET-007 and verified baked into the live
   container. Status Feedback.
+- 2026-11-24: operator marked Done.

@@ -1,7 +1,7 @@
 ---
 id: TICKET-007
 title: "Deploy mailotp serve as a sidecar in the scopeweaver stack"
-status: Feedback     # New | To-Do | WIP | Feedback | Done
+status: Done         # New | To-Do | WIP | Feedback | Done
 area: ops, agent
 priority: high
 blocked_by: none
@@ -140,3 +140,4 @@ source (cmd/mailotp sync vs private module).
   with TICKET-010 (skill). Status Feedback: awaiting operator sign-off (no PR;
   direct-to-branch deploy mode). TICKET-008/009 (Prometheus/Grafana wiring) are now
   actionable (the daemon is live on :9469).
+- 2026-11-24: operator marked Done.
