@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/emersion/go-imap"
@@ -57,8 +58,12 @@ func (ff *filterFlags) toRequest(op string) Request {
 	return req
 }
 
-// resolveAgent falls back to environment identity when --agent is not given, so
-// metrics attribution works even if the agent forgets to pass it.
+// resolveAgent determines the caller identity for metrics attribution without
+// the agent having to pass --agent: an explicit flag wins, then the environment,
+// then the task id in the working directory. ARTEX runs an agent's shell
+// commands for a sign-up under /app/data/tasks/<id>/..., so a read made from
+// there (the common case for fetch/query) is attributed to that task on its own.
+// When none of these apply the label is empty and the daemon records "unknown".
 func resolveAgent(flagVal string) string {
 	if flagVal != "" {
 		return flagVal
@@ -66,7 +71,28 @@ func resolveAgent(flagVal string) string {
 	if v := os.Getenv("MAILOTP_AGENT"); v != "" {
 		return v
 	}
-	return os.Getenv("ARTEX_TASK_ID")
+	if v := os.Getenv("ARTEX_TASK_ID"); v != "" {
+		return v
+	}
+	if id := taskIDFromCwd(); id != "" {
+		return "task" + id
+	}
+	return ""
+}
+
+// taskDirRe pulls the numeric task id out of a working directory like
+// /app/data/tasks/16/i8464.
+var taskDirRe = regexp.MustCompile(`(?:^|/)tasks/([0-9]+)(?:/|$)`)
+
+func taskIDFromCwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if m := taskDirRe.FindStringSubmatch(wd); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 func cmdQuery(args []string) int {

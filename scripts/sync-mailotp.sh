@@ -10,7 +10,7 @@ set -eu
 SRC="${1:-$HOME/bugbounty/src/mailotp}"
 DST="$(cd "$(dirname "$0")/.." && pwd)/cmd/mailotp"
 
-files="main.go extract.go imap.go proto.go store.go serve.go client_cmds.go metrics.go extract_test.go store_test.go"
+files="main.go extract.go imap.go proto.go store.go serve.go client_cmds.go metrics.go extract_test.go store_test.go client_cmds_test.go"
 for f in $files; do
 	cp "$SRC/$f" "$DST/$f"
 done

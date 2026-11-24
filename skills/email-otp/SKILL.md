@@ -96,9 +96,10 @@ waits for a match to appear.
 - `--since <dur>`: only mail received within the window, e.g. `30m`.
 - `--wait <sec>` (fetch, default 90): how long to wait for a match to arrive.
 - `--limit <n>` / `--max-chars <n>`: cap the result count / body length.
-- `--agent <id>`: label your reads for metrics (optional; otherwise taken from the
-  environment). Pass your task/intent id so the operator can see which agent read
-  which mail.
+- `--agent <id>`: override the identity labelled on your reads for metrics. You
+  usually do not need it: a read is attributed to your task automatically (from the
+  task directory you run in), so the operator already sees which agent read which
+  mail.
 - `--json`: machine-readable output.
 
 Exit code `0` means a message was printed; `2` means nothing matched within
