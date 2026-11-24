@@ -4,7 +4,7 @@ title: "Deploy mailotp serve as a sidecar in the scopeweaver stack"
 status: New          # New | To-Do | WIP | Feedback | Done
 area: ops, agent
 priority: high
-blocked_by: operator go-ahead for the live deploy (and the build-source decision)
+blocked_by: operator go-ahead for the live cutover (build source decided: Option A)
 owner: psylinux
 branch: none
 pr: none
@@ -57,9 +57,9 @@ Grounded in the current repo: `start.sh` is the ENTRYPOINT and supervises the
 `CGO_ENABLED=0 go build -o /mailotp ./cmd/mailotp` and installs it at
 `/usr/local/bin/mailotp`; `cmd/mailotp` imports `github.com/Autumn-27/artex/sharedsecrets`.
 
-### Build source (operator decision; A recommended)
+### Build source (operator confirmed Option A, 2026-11-24)
 
-- **Option A (recommended) - sync into `cmd/mailotp`.** Copy the Fase 1 files
+- **Option A (CHOSEN) - sync into `cmd/mailotp`.** Copy the Fase 1 files
   (store.go, proto.go, serve.go, client_cmds.go, metrics.go, imap.go, extract.go,
   main.go) from `psylinux/mailotp` into `cmd/mailotp`, rewriting the one import
   `github.com/psylinux/mailotp/internal/sharedsecrets` ->
@@ -127,3 +127,4 @@ source (cmd/mailotp sync vs private module).
 ## Log
 
 - 2026-11-24: filed (New), split from TICKET-006; awaits operator go-ahead for the live cutover.
+- 2026-11-24: operator confirmed build source Option A (sync into cmd/mailotp). Only the go-ahead for the live cutover remains.
