@@ -14,8 +14,13 @@ that requires an email address or authentication.
 The `mailotp` helper connects to a mailbox over IMAP and prints the newest email's
 `From`, `Date`, `Subject` and full decoded body. It does not try to find the code
 for you: read the printed email and take the one-time code or verification link
-yourself. The code is sometimes in the **subject**. The helper loads the mailbox
-password itself from the shared secrets file, so you never see or handle it.
+yourself. The code is sometimes in the **subject**, and some emails carry it only
+in their HTML part, so the helper prints both the plain text and, under a
+`--- HTML part (tags stripped) ---` marker, the readable text of the HTML part
+(with `<style>`/`<script>` noise removed and any `href` links collected under
+`Links in this email:`). **Read the whole output, not just the top** - the code or
+link may be in the subject, the plain text, or the HTML part. The helper loads the
+mailbox password itself from the shared secrets file, so you never see or handle it.
 
 Only ever read mailboxes you own through this helper, and only create accounts you
 own on the target.
@@ -77,3 +82,14 @@ Exit code `0` means an email was printed; `2` means nothing arrived within
 `--wait` (make sure you actually triggered the send, then retry with a longer
 `--wait`, or a `--from`/`--subject` filter); `1` is a configuration or connection
 error.
+
+## Timing and re-reads
+
+`fetch` reads the mailbox **read-only**: it never marks a message read or deletes
+it, so you can fetch the same email again as many times as you need. It looks at
+mail that arrived from about when you ran it (minus `--grace`), newest first - it
+is **not** a full-inbox search. So trigger the send first, then fetch. If a code
+or link already landed a while ago (or you got exit `2` or an older, unrelated
+email), raise `--grace` to reach back to it, e.g. `mailotp fetch --mailbox 01
+--wait 1 --grace 600`, and add `--from`/`--subject` to pick it out when several
+emails are present.

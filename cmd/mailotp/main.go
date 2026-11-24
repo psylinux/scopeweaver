@@ -44,9 +44,13 @@ import (
 )
 
 var (
-	tagRe  = regexp.MustCompile(`(?s)<[^>]*>`)
-	hrefRe = regexp.MustCompile(`(?i)href\s*=\s*["']([^"']+)["']`)
-	urlRe  = regexp.MustCompile(`https?://[^\s"'<>)]+`)
+	// styleScriptRe drops the contents of <style>/<script> blocks so their CSS
+	// and JavaScript do not pollute the HTML-derived text or, worse, push a code
+	// that lives only in the HTML past the --max-chars cap.
+	styleScriptRe = regexp.MustCompile(`(?is)<(style|script)\b[^>]*>.*?</(style|script)>`)
+	tagRe         = regexp.MustCompile(`(?s)<[^>]*>`)
+	hrefRe        = regexp.MustCompile(`(?i)href\s*=\s*["']([^"']+)["']`)
+	urlRe         = regexp.MustCompile(`https?://[^\s"'<>)]+`)
 )
 
 const defaultMaxChars = 6000
@@ -286,10 +290,13 @@ func envelopeMeta(m *imap.Message) (subject, sender string) {
 	return subject, sender
 }
 
-// extractBody returns the decoded, human-readable text of a message. It prefers
-// text/plain; for an HTML-only message it strips the tags and appends the links
-// found in href attributes, so a confirmation URL that lives only in the markup
-// is not lost. The result is capped at maxChars.
+// extractBody returns the decoded, human-readable text of a message. It keeps
+// both the text/plain and the tag-stripped text/html parts, plus the links
+// found in href attributes, so the agent sees the full body and a one-time code
+// or confirmation URL is never dropped - in particular when it appears only in
+// the HTML alternative of a multipart/alternative message. The HTML part is
+// omitted only when it carries nothing the plain text already has. The result
+// is capped at maxChars.
 func extractBody(r io.Reader, maxChars int) (string, bool) {
 	if r == nil {
 		return "", false
@@ -305,14 +312,39 @@ func extractBody(r io.Reader, maxChars int) (string, bool) {
 	var plain, htmlBuf strings.Builder
 	walkEntity(ent, &plain, &htmlBuf, 0)
 
-	if p := strings.TrimSpace(plain.String()); p != "" {
-		return capStr(p, maxChars)
+	var sections []string
+	plainTxt := strings.TrimSpace(plain.String())
+	if plainTxt != "" {
+		sections = append(sections, plainTxt)
 	}
-	vis, trunc := capStr(strings.TrimSpace(collapse(htmlBuf.String())), maxChars)
+	if htmlTxt := strings.TrimSpace(collapse(htmlBuf.String())); htmlTxt != "" && !redundant(htmlTxt, plainTxt) {
+		if len(sections) > 0 {
+			sections = append(sections, "--- HTML part (tags stripped) ---\n"+htmlTxt)
+		} else {
+			sections = append(sections, htmlTxt)
+		}
+	}
+	body := strings.Join(sections, "\n\n")
 	if links := extractLinks(htmlBuf.String()); len(links) > 0 {
-		vis += "\n\nLinks in this email:\n" + strings.Join(links, "\n")
+		body += "\n\nLinks in this email:\n" + strings.Join(links, "\n")
 	}
-	return vis, trunc
+	return capStr(strings.TrimSpace(body), maxChars)
+}
+
+// redundant reports whether the HTML-derived text carries nothing - no code,
+// no link text - that the plain text does not already contain. It compares the
+// two with case and whitespace removed, so the HTML part is dropped only when
+// it is a genuine substring of the plain part; anything the plain part lacks
+// (such as a code shown only in the HTML) keeps the HTML part in the output.
+func redundant(htmlTxt, plainTxt string) bool {
+	h := squash(htmlTxt)
+	return h != "" && strings.Contains(squash(plainTxt), h)
+}
+
+// squash lowercases a string and removes all whitespace, for substring compares
+// that ignore how plain and HTML renderings space their text.
+func squash(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), ""))
 }
 
 // walkEntity collects the decoded text of a message into plain and html, by
@@ -370,8 +402,10 @@ func extractLinks(h string) []string {
 	return out
 }
 
-// collapse strips HTML tags, unescapes entities and squeezes whitespace.
+// collapse drops <style>/<script> blocks, strips the remaining HTML tags,
+// unescapes entities and squeezes whitespace down to the visible text.
 func collapse(s string) string {
+	s = styleScriptRe.ReplaceAllString(s, " ")
 	s = tagRe.ReplaceAllString(s, " ")
 	s = html.UnescapeString(s)
 	return strings.Join(strings.Fields(s), " ")
