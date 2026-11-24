@@ -1,12 +1,12 @@
 ---
 id: TICKET-007
 title: "Deploy mailotp serve as a sidecar in the scopeweaver stack"
-status: New          # New | To-Do | WIP | Feedback | Done
+status: WIP          # New | To-Do | WIP | Feedback | Done
 area: ops, agent
 priority: high
-blocked_by: operator go-ahead for the live cutover (build source decided: Option A)
+blocked_by: none
 owner: psylinux
-branch: none
+branch: v0.1.0-authfix
 pr: none
 source: operator request (split the pending TICKET-006 Fase 1b deploy items into their own tickets, 2026-11-24)
 ---

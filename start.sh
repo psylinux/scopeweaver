@@ -18,9 +18,34 @@ MAX_DELAY=60
 
 child=0
 stopping=0
+mailotp_sup=0
+
+# mailotp serve: email OTP sync sidecar (TICKET-007). One IMAP talker per host,
+# syncing the controlled mailboxes into a local store that agents read over a
+# unix socket. Best-effort: if it is down, the email-otp skill falls back to a
+# direct IMAP read. Supervised in a subshell so a crash restarts it; the subshell
+# forwards a signal to the running daemon so shutdown is graceful.
+MAILOTP_BIN=/usr/local/bin/mailotp
+if [ -x "$MAILOTP_BIN" ]; then
+	(
+		trap 'exit 0' INT TERM
+		while :; do
+			"$MAILOTP_BIN" serve &
+			sp=$!
+			trap 'kill -TERM "$sp" 2>/dev/null; exit 0' INT TERM
+			wait "$sp"
+			sleep 2
+		done
+	) &
+	mailotp_sup=$!
+	echo "[ScopeWeaver] $(msg "mailotp serve sidecar started (pid $mailotp_sup)" "mailotp serve 사이드카 시작 (pid $mailotp_sup)")"
+fi
 
 forward() {
 	stopping=1
+	if [ "$mailotp_sup" -ne 0 ]; then
+		kill -TERM "$mailotp_sup" 2>/dev/null || true
+	fi
 	if [ "$child" -ne 0 ]; then
 		kill -TERM "$child" 2>/dev/null || true
 	fi

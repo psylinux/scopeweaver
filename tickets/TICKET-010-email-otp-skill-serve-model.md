@@ -1,12 +1,12 @@
 ---
 id: TICKET-010
 title: "Update the email-otp skill to the serve/query/alloc model"
-status: New          # New | To-Do | WIP | Feedback | Done
+status: WIP          # New | To-Do | WIP | Feedback | Done
 area: agent, skills
 priority: high
 blocked_by: TICKET-007
 owner: psylinux
-branch: none
+branch: v0.1.0-authfix
 pr: none
 source: operator request (one ticket per pending Fase 1b item, 2026-11-24)
 ---

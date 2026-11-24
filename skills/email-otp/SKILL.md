@@ -1,6 +1,6 @@
 ---
 name: email-otp
-description: Read a sign-up email (one-time code or confirmation link) from a controlled ARTEX mailbox over IMAP, using the mailotp helper. Use during account creation and any flow that emails a code or verification link.
+description: Read a sign-up email (one-time code or confirmation link) from a controlled ARTEX mailbox, using the mailotp helper. Use during account creation and any flow that emails a code or verification link.
 allowed-tools: Bash(mailotp:*)
 ---
 
@@ -9,72 +9,50 @@ allowed-tools: Bash(mailotp:*)
 ARTEX owns a small pool of real, readable mailboxes for creating and operating its
 own accounts on in-scope targets. Use them for authenticated testing, A/B
 comparisons, IDOR and other tests that need two distinct accounts, and any flow
-that requires an email address or authentication.
+that requires an email address or verification.
 
-The `mailotp` helper connects to a mailbox over IMAP and prints the newest email's
-`From`, `Date`, `Subject` and full decoded body. It does not try to find the code
+A background service (`mailotp serve`) continuously syncs those mailboxes into a
+local store. You never connect to a mailbox yourself: every `mailotp` command below
+is a fast local read against that store. The helper prints each email's `From`,
+`Date`, `To`, `Subject` and full decoded body, and does not try to find the code
 for you: read the printed email and take the one-time code or verification link
 yourself. The code is sometimes in the **subject**, and some emails carry it only
 in their HTML part, so the helper prints both the plain text and, under a
-`--- HTML part (tags stripped) ---` marker, the readable text of the HTML part
-(with `<style>`/`<script>` noise removed and any `href` links collected under
-`Links in this email:`). **Read the whole output, not just the top** - the code or
-link may be in the subject, the plain text, or the HTML part. The helper loads the
-mailbox password itself from the shared secrets file, so you never see or handle it.
+`--- HTML part (tags stripped) ---` marker, the readable HTML text (with any `href`
+links collected under `Links in this email:`). **Read the whole output.** The
+service loads the mailbox password itself, so you never see or handle it.
 
 Only ever read mailboxes you own through this helper, and only create accounts you
 own on the target.
 
-## Mailboxes
+## Sign up and read your own code (the normal flow)
 
-```
-mailotp mailboxes
-```
+These mailboxes are shared by many agents at once, so you must read **your** email,
+not someone else's. `mailotp alloc` gives you a unique address for one sign-up and
+a handle that reads exactly its reply:
 
-prints the configured slots and their addresses, for example:
-
-```
-01  psylinux.hackerone.test01@gmail.com  (ready)
-02  psylinux.hackerone.test02@gmail.com  (ready)
-```
-
-Use mailbox `01` for one account and `02` for a second, independent account (the
-two sides of an A/B or IDOR test).
-
-## Isolating your message on a shared mailbox
-
-These mailboxes are shared by many agents working in parallel, so a bare `fetch`
-can hand you another agent's email. Pin each sign-up to **your** request with a
-unique sub-address: register with `psylinux.hackerone.test01+<tag>@gmail.com`
-(Gmail delivers anything after `+` to the same inbox and keeps the `+tag` in the
-`To` header). Make `<tag>` unique to this sign-up - e.g. your intent id plus a few
-random characters, like `+t15i7700x9f2`. Then read only your message with `--to`:
-
-```
-mailotp fetch --mailbox 01 --to +t15i7700x9f2 --wait 60
-```
-
-If the site rejects `+` in the address, fall back to the bare address and
-disambiguate with `--from`/`--subject`, and fetch promptly so a concurrent
-sign-up on the same site does not shadow yours.
-
-## Flow
-
-1. Pick a mailbox (`01` or `02`) and read its address from `mailotp mailboxes`.
-2. Add a unique `+tag` and enter `...test01+<tag>@gmail.com` in the target's
-   sign-up / email field and submit, so the target sends the code or verification
-   email to your tagged address.
-3. Immediately read back only your message:
+1. Reserve an address on a mailbox:
 
    ```
-   mailotp fetch --mailbox 01 --to +<tag> --wait 60
+   mailotp alloc --mailbox 01
+   ```
+   ```
+   handle:  8142abc9cbe2dda1
+   address: psylinux.hackerone.test01+95bb6638@gmail.com
    ```
 
-   It waits up to `--wait` seconds for a new message and prints it:
+2. Enter that `address` in the target's sign-up / email field and submit.
 
+3. Wait for and read only your message, by its handle:
+
+   ```
+   mailotp fetch --handle 8142abc9cbe2dda1 --wait 90
+   ```
+   It blocks up to `--wait` seconds for your email to arrive, then prints it:
    ```
    Mailbox: 01
    From:    no-reply@target.example
+   To:      psylinux.hackerone.test01+95bb6638@gmail.com
    Date:    2026-11-24T02:37:46Z
    Subject: Verify your email
 
@@ -82,35 +60,56 @@ sign-up on the same site does not shadow yours.
    https://target.example/verify?token=...
    ```
 
-4. Read the code or link out of that email and use it: type the code into the
-   page, or open the link in the browser, to finish verification.
+4. Read the code or link out of it and use it (type the code, or open the link).
 
-## Options and exit codes
+5. When done, free the reservation: `mailotp release --handle 8142abc9cbe2dda1`.
 
-- `--mailbox <NN>` (required): the slot, e.g. `01` or `02`.
-- `--wait <sec>` (default 90): how long to wait for a new message to arrive.
-- `--grace <sec>` (default 30): also accept a message received up to this many
-  seconds before you ran fetch (covers an email that landed just before).
-- `--from <substr>` / `--subject <substr>`: only consider messages whose sender
-  or subject contains the substring, when more than one email may arrive.
-- `--to <substr>`: only consider messages whose recipient (`To`) contains the
-  substring - pass your `+tag` here to read only your own sign-up's email on a
-  shared mailbox.
-- `--max-chars <n>` (default 6000): truncate the printed body.
-- `--json`: print `{mailbox, from, to, date, subject, body, truncated}` instead.
+Gmail delivers `...test01+<tag>@gmail.com` to the same inbox and keeps the `+tag`
+in the `To` header, so the handle reads your message even while other agents use
+the same mailbox. If a site **rejects `+`** in an address, lease the whole mailbox
+instead: `mailotp alloc --mailbox 01 --no-plus` returns the bare address and holds
+the mailbox for you until you `release`.
 
-Exit code `0` means an email was printed; `2` means nothing arrived within
+Use mailbox `01` for one account and `02` for a second, independent account (the
+two sides of an A/B or IDOR test). `mailotp mailboxes` lists the slots and how many
+messages are synced.
+
+## Searching the mailboxes
+
+To look through mail already received (not tied to one alloc), search the local
+store directly:
+
+```
+mailotp query --mailbox 01 --from target.example --since 15m
+mailotp query --subject verify --limit 5
+```
+
+`query` returns matches at once (newest first); `fetch` is the same search but
+waits for a match to appear.
+
+## Options
+
+- `--handle H`: read only the message for an `alloc` handle (the normal way).
+- `--mailbox NN`: a slot, e.g. `01` or `02`.
+- `--from` / `--to` / `--subject` / `--body <substr>`: case-insensitive substring
+  filters (`--to` matches the `To`/`Delivered-To`, e.g. a `+tag`).
+- `--since <dur>`: only mail received within the window, e.g. `30m`.
+- `--wait <sec>` (fetch, default 90): how long to wait for a match to arrive.
+- `--limit <n>` / `--max-chars <n>`: cap the result count / body length.
+- `--agent <id>`: label your reads for metrics (optional; otherwise taken from the
+  environment). Pass your task/intent id so the operator can see which agent read
+  which mail.
+- `--json`: machine-readable output.
+
+Exit code `0` means a message was printed; `2` means nothing matched within
 `--wait` (make sure you actually triggered the send, then retry with a longer
-`--wait`, or a `--from`/`--subject` filter); `1` is a configuration or connection
-error.
+`--wait`); `1` is a configuration or service error.
 
-## Timing and re-reads
+## Notes
 
-`fetch` reads the mailbox **read-only**: it never marks a message read or deletes
-it, so you can fetch the same email again as many times as you need. It looks at
-mail that arrived from about when you ran it (minus `--grace`), newest first - it
-is **not** a full-inbox search. So trigger the send first, then fetch. If a code
-or link already landed a while ago (or you got exit `2` or an older, unrelated
-email), raise `--grace` to reach back to it, e.g. `mailotp fetch --mailbox 01
---wait 1 --grace 600`, and add `--from`/`--subject` to pick it out when several
-emails are present.
+- Reads are **read-only** and re-readable: a message is never marked read or
+  deleted, so you can fetch the same email again as many times as you need.
+- `mailotp fetch --mailbox 01 --wait 60` still works for a quick "newest on this
+  mailbox" read, and falls back to a direct IMAP read if the service is down. But
+  for a sign-up, prefer `alloc` + `fetch --handle`, so you never read another
+  agent's code.
