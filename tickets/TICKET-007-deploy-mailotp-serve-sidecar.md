@@ -50,6 +50,72 @@ cutover.
 - [ ] affected docs updated (README, this ticket, TICKET-006 remaining).
 - [ ] PR opened; ticket set to `Feedback`.
 
+## Approach (Fase 1B plan)
+
+Grounded in the current repo: `start.sh` is the ENTRYPOINT and supervises the
+`scopeweaver` binary in a restart loop; the Dockerfile builds mailotp with
+`CGO_ENABLED=0 go build -o /mailotp ./cmd/mailotp` and installs it at
+`/usr/local/bin/mailotp`; `cmd/mailotp` imports `github.com/Autumn-27/artex/sharedsecrets`.
+
+### Build source (operator decision; A recommended)
+
+- **Option A (recommended) - sync into `cmd/mailotp`.** Copy the Fase 1 files
+  (store.go, proto.go, serve.go, client_cmds.go, metrics.go, imap.go, extract.go,
+  main.go) from `psylinux/mailotp` into `cmd/mailotp`, rewriting the one import
+  `github.com/psylinux/mailotp/internal/sharedsecrets` ->
+  `github.com/Autumn-27/artex/sharedsecrets` (same API; the standalone copy derives
+  from it), and add `modernc.org/sqlite` + `prometheus/client_golang` to the
+  scopeweaver go.mod. The existing Dockerfile line is unchanged and needs no
+  build-time auth; modernc is pure Go so `CGO_ENABLED=0` keeps working. Source of
+  truth stays `psylinux/mailotp`; `cmd/mailotp` is a generated mirror refreshed by
+  a small `scripts/sync-mailotp.sh` at each release.
+- **Option B - pull the private module** (`go install github.com/psylinux/mailotp@<rev>`),
+  needing GOPRIVATE + a deploy key/token as a BuildKit secret. Single source of
+  truth, but adds build-time auth and risk to the hardened build. Not recommended.
+
+### Sidecar (start.sh)
+
+Launch `mailotp serve` as a supervised background process before the app loop
+(restart on exit, kill on INT/TERM alongside the app). It reads creds from the
+already-mounted `/root/.config/bugbounty/secrets.yaml`, creates `/app/data/mailotp/`,
+listens on the socket there and exposes `:9469`. No ordering dependency:
+`fetch --mailbox NN` falls back to a direct read until the daemon is up.
+
+### Image + Ansible
+
+The `cmd/mailotp` change rebuilds the baked binary with no Dockerfile change beyond
+the new go.mod deps. Bump `scopeweaver_image` (authfix.8) and `scopeweaver_version`
+in recon-server `ansible/roles/scopeweaver`; the image builds-when-missing, so the
+deploy produces it reproducibly. Keep authfix.7 for rollback.
+
+### Metrics exposure
+
+`:9469` is reached by Prometheus over the `scopeweaver_default` docker network by
+container name; no host port publish needed (TICKET-008 adds the scrape).
+
+### Cutover (the proven procedure)
+
+1. Note the running tasks (paused=false; today 13/15/16).
+2. Pause them via the API.
+3. `docker compose up -d` to recreate scopeweaver with the new image (postgres and
+   `sw_data` untouched; the mailotp store starts empty and backfills in seconds).
+4. Verify: `mailotp mailboxes` shows synced counts, `/metrics` responds, and the
+   `email-otp` skill is the serve-model version (TICKET-010).
+5. Resume exactly the tasks from step 1.
+6. Confirm an agent can `fetch`/`query`.
+
+Ships together with TICKET-010 (skill) in the same image. Rollback: recreate with
+authfix.7 (direct-fetch helper) and the previous skill.
+
+### Risks
+
+- The daemon holds 2 persistent IMAP connections (vs the per-agent churn it
+  replaces) - well under Gmail's ~15 cap.
+- A serve crash: start.sh restarts it and agents fall back to a direct fetch
+  meanwhile; no hard dependency.
+- Store on `sw_data` survives a recreate; first start backfills ~50/folder
+  (~2s observed in the Fase 1 smoke).
+
 ## Notes / dependencies
 
 Parent: TICKET-006. Gates TICKET-008 (Prometheus), TICKET-009 (Grafana) and
