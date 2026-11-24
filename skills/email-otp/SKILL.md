@@ -41,15 +41,33 @@ prints the configured slots and their addresses, for example:
 Use mailbox `01` for one account and `02` for a second, independent account (the
 two sides of an A/B or IDOR test).
 
+## Isolating your message on a shared mailbox
+
+These mailboxes are shared by many agents working in parallel, so a bare `fetch`
+can hand you another agent's email. Pin each sign-up to **your** request with a
+unique sub-address: register with `psylinux.hackerone.test01+<tag>@gmail.com`
+(Gmail delivers anything after `+` to the same inbox and keeps the `+tag` in the
+`To` header). Make `<tag>` unique to this sign-up - e.g. your intent id plus a few
+random characters, like `+t15i7700x9f2`. Then read only your message with `--to`:
+
+```
+mailotp fetch --mailbox 01 --to +t15i7700x9f2 --wait 60
+```
+
+If the site rejects `+` in the address, fall back to the bare address and
+disambiguate with `--from`/`--subject`, and fetch promptly so a concurrent
+sign-up on the same site does not shadow yours.
+
 ## Flow
 
 1. Pick a mailbox (`01` or `02`) and read its address from `mailotp mailboxes`.
-2. Enter that address in the target's sign-up / email field and submit, so the
-   target sends the code or verification email.
-3. Immediately read the email back:
+2. Add a unique `+tag` and enter `...test01+<tag>@gmail.com` in the target's
+   sign-up / email field and submit, so the target sends the code or verification
+   email to your tagged address.
+3. Immediately read back only your message:
 
    ```
-   mailotp fetch --mailbox 01 --wait 60
+   mailotp fetch --mailbox 01 --to +<tag> --wait 60
    ```
 
    It waits up to `--wait` seconds for a new message and prints it:
@@ -75,8 +93,11 @@ two sides of an A/B or IDOR test).
   seconds before you ran fetch (covers an email that landed just before).
 - `--from <substr>` / `--subject <substr>`: only consider messages whose sender
   or subject contains the substring, when more than one email may arrive.
+- `--to <substr>`: only consider messages whose recipient (`To`) contains the
+  substring - pass your `+tag` here to read only your own sign-up's email on a
+  shared mailbox.
 - `--max-chars <n>` (default 6000): truncate the printed body.
-- `--json`: print `{mailbox, from, date, subject, body, truncated}` instead.
+- `--json`: print `{mailbox, from, to, date, subject, body, truncated}` instead.
 
 Exit code `0` means an email was printed; `2` means nothing arrived within
 `--wait` (make sure you actually triggered the send, then retry with a longer

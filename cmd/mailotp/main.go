@@ -80,7 +80,7 @@ func usage() {
 
 Usage:
   mailotp mailboxes
-  mailotp fetch --mailbox <NN> [--wait 90] [--grace 30] [--from s] [--subject s] [--max-chars 6000] [--json]
+  mailotp fetch --mailbox <NN> [--wait 90] [--grace 30] [--from s] [--subject s] [--to s] [--max-chars 6000] [--json]
 
 Prints the newest matching email's From/Date/Subject and decoded body. The agent
 reads the code or link from it. Credentials come from secrets.yaml
@@ -118,6 +118,7 @@ func cmdFetch(args []string) int {
 	grace := fs.Int("grace", 30, "also accept a message received up to this many seconds before now")
 	from := fs.String("from", "", "only consider messages whose sender contains this substring")
 	subject := fs.String("subject", "", "only consider messages whose subject contains this substring")
+	to := fs.String("to", "", "only consider messages whose recipient (To) contains this substring, e.g. the +tag address you signed up with")
 	poll := fs.Int("poll", 5, "seconds between IMAP polls")
 	maxChars := fs.Int("max-chars", defaultMaxChars, "truncate the printed body to this many characters")
 	asJSON := fs.Bool("json", false, "print the result as a JSON object")
@@ -158,7 +159,7 @@ func cmdFetch(args []string) int {
 	seen := map[uint32]bool{}
 
 	for {
-		m, err := scanOnce(c, section, seen, floor, *from, *subject, *maxChars)
+		m, err := scanOnce(c, section, seen, floor, *from, *subject, *to, *maxChars)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mailotp fetch: %v\n", err)
 			return 1
@@ -179,6 +180,7 @@ func cmdFetch(args []string) int {
 type mailMsg struct {
 	subject   string
 	from      string
+	to        string
 	date      time.Time
 	body      string
 	truncated bool
@@ -187,7 +189,7 @@ type mailMsg struct {
 // scanOnce returns the newest message in INBOX received at or after floor that
 // matches the optional from/subject filters and has not been returned before.
 // Relevance is left to the caller (the AI agent): no content filtering is done.
-func scanOnce(c *client.Client, section *imap.BodySectionName, seen map[uint32]bool, floor time.Time, fromF, subjF string, maxChars int) (*mailMsg, error) {
+func scanOnce(c *client.Client, section *imap.BodySectionName, seen map[uint32]bool, floor time.Time, fromF, subjF, toF string, maxChars int) (*mailMsg, error) {
 	mbox, err := c.Select("INBOX", true)
 	if err != nil {
 		return nil, fmt.Errorf("select INBOX: %w", err)
@@ -227,9 +229,13 @@ func scanOnce(c *client.Client, section *imap.BodySectionName, seen map[uint32]b
 		if subjF != "" && !strings.Contains(strings.ToLower(subj), strings.ToLower(subjF)) {
 			continue
 		}
+		rcpt := recipients(m)
+		if toF != "" && !strings.Contains(strings.ToLower(rcpt), strings.ToLower(toF)) {
+			continue
+		}
 		seen[m.Uid] = true
 		body, trunc := extractBody(m.GetBody(section), maxChars)
-		return &mailMsg{subject: subj, from: sender, date: m.InternalDate, body: body, truncated: trunc}, nil
+		return &mailMsg{subject: subj, from: sender, to: rcpt, date: m.InternalDate, body: body, truncated: trunc}, nil
 	}
 	return nil, nil
 }
@@ -237,13 +243,13 @@ func scanOnce(c *client.Client, section *imap.BodySectionName, seen map[uint32]b
 func printMsg(slot string, m *mailMsg, asJSON bool) {
 	if asJSON {
 		b, _ := json.Marshal(map[string]any{
-			"mailbox": slot, "from": m.from, "date": m.date.Format(time.RFC3339),
+			"mailbox": slot, "from": m.from, "to": m.to, "date": m.date.Format(time.RFC3339),
 			"subject": m.subject, "body": m.body, "truncated": m.truncated,
 		})
 		fmt.Println(string(b))
 		return
 	}
-	fmt.Printf("Mailbox: %s\nFrom:    %s\nDate:    %s\nSubject: %s\n\n%s\n", slot, m.from, m.date.Format(time.RFC3339), m.subject, m.body)
+	fmt.Printf("Mailbox: %s\nFrom:    %s\nTo:      %s\nDate:    %s\nSubject: %s\n\n%s\n", slot, m.from, m.to, m.date.Format(time.RFC3339), m.subject, m.body)
 	if m.truncated {
 		fmt.Fprintln(os.Stderr, "[body truncated; raise --max-chars to see more]")
 	}
@@ -288,6 +294,21 @@ func envelopeMeta(m *imap.Message) (subject, sender string) {
 		}
 	}
 	return subject, sender
+}
+
+// recipients joins a message's To addresses, for the --to substring filter and
+// for display. Gmail keeps the +tag in the To header, so matching the address
+// the agent signed up with (e.g. test01+t15i7700@gmail.com) pins the message to
+// that one request even when the mailbox is shared by other agents.
+func recipients(m *imap.Message) string {
+	if m.Envelope == nil {
+		return ""
+	}
+	addrs := make([]string, 0, len(m.Envelope.To))
+	for _, a := range m.Envelope.To {
+		addrs = append(addrs, a.Address())
+	}
+	return strings.Join(addrs, ", ")
 }
 
 // extractBody returns the decoded, human-readable text of a message. It keeps
