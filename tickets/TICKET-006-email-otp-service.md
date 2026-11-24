@@ -126,14 +126,20 @@ concurrency problem above.
   smoke confirmed the endpoint and the per-agent attribution. **SQLite durability
   confirmed:** the store at `/app/data/mailotp/store.db` sits on the `sw_data`
   named volume (same model as the artex Postgres), so it survives a recreate.
-- **Remaining (deploy wiring, pending operator go-ahead for the live cutover):**
-  run `mailotp serve` as a sidecar from `start.sh`, build it into the scopeweaver
-  image, bump the recon-server Ansible role, update the `email-otp` skill to steer
-  agents to `alloc`/`query`/`fetch --handle`, wire the `monitoring/` scrape job and
-  Grafana dashboard into services/monitoring (+ Ansible), then pause/recreate/
-  resume the live container (postgres untouched). This changes the runtime
-  topology (a new daemon holding persistent IMAP connections), so it is staged
-  separately from the code.
+- **2026-11-24 - Fase 1 code pushed; remaining deploy work split into its own
+  tickets (operator asked for one ticket per pending item).** `psylinux/mailotp`
+  `main` is at `de88d32`, scopeweaver `v0.1.0-authfix` at `96b33d4`. The Fase 1b
+  deploy, which changes the runtime topology (a new daemon holding persistent IMAP
+  connections), is now tracked by:
+  - **TICKET-007** - deploy `mailotp serve` as a sidecar (start.sh + image +
+    Ansible + pause/recreate/resume). The gate for the rest; carries the
+    build-source decision (cmd/mailotp sync vs private module).
+  - **TICKET-008** - wire `/metrics` into Prometheus.
+  - **TICKET-009** - provision the Grafana dashboard.
+  - **TICKET-010** - update the `email-otp` skill to the serve model (ships with
+    TICKET-007).
+
+  This ticket stays WIP until 007-010 land; the service code itself is done.
 
 ## Relation
 
