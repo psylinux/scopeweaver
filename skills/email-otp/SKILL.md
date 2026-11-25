@@ -87,6 +87,13 @@ mailotp query --subject verify --limit 5
 `query` returns matches at once (newest first); `fetch` is the same search but
 waits for a match to appear.
 
+**A mailbox-wide read is not scoped to you.** `query` / `fetch --mailbox NN` (with no
+`--handle`) return every message in that shared mailbox inside the window: other
+agents' sign-ups, and real pre-existing mail the mailbox already carried. A code you
+find this way may belong to someone else or to no test at all. Prefer `alloc` +
+`fetch --handle`, and whatever you read, apply the provenance check below before you
+use a code.
+
 ## Options
 
 - `--handle H`: read only the message for an `alloc` handle (the normal way).
@@ -105,6 +112,23 @@ waits for a match to appear.
 Exit code `0` means a message was printed; `2` means nothing matched within
 `--wait` (make sure you actually triggered the send, then retry with a longer
 `--wait`); `1` is a configuration or service error.
+
+## Before you use a code or link
+
+A code is yours only if you can tie it to a sign-up you just performed. Check, every
+time:
+
+- **Read by your own handle?** `fetch --handle` is scoped to your `alloc` address, so
+  its result is yours. This is the safe default; prefer it.
+- **Read by a mailbox-wide query/fetch?** Then confirm both: the `To:` (or
+  `Delivered-To:`) header carries **your** `+tag` from `alloc`, **and** the `From:` /
+  `Subject:` match the exact service you just submitted your address to.
+
+If the `To:` is the bare address or a tag that is not yours, or the sender is a
+service you did not just sign up for, the code is **not yours**: do not enter it
+anywhere, log it as an observation (note it as ambient mailbox noise, with the
+sender), and move on. These mailboxes are real and shared, so unrelated confirmation
+codes will arrive on their own. Finding a code is not evidence that you triggered it.
 
 ## Notes
 
