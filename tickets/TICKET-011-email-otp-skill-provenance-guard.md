@@ -42,6 +42,13 @@ could not tie to any flow it drove, and correctly held. Investigation:
     own `--handle`, or if a mailbox-wide read's `To:` carries your `+tag` AND the
     `From:` / `Subject:` match the service you just signed up for; otherwise log it as
     ambient noise and move on.
+- The task **goal directive** (`exploration_nodes`, `kind=goal`, `origin=human`), which
+  is what actually drives agent behaviour (the skill is only loaded on demand). The old
+  seed told agents to `mailotp fetch --mailbox 01`; 10 live goals (tasks 13-22) carried
+  it and none mentioned `alloc`/`--handle`. Rewritten to the scoped alloc+handle flow
+  plus the provenance guard.
+- `ops/email-otp/task-seed-directive.md`: the canonical goal text to seed into every
+  NEW task (there is no DB template; the operator pastes it at `create`).
 
 ## How it goes live
 
@@ -62,6 +69,10 @@ the recon-server Ansible `scopeweaver_image` / `scopeweaver_version` defaults.
 
 - [x] Skill reinforces `alloc` + `fetch --handle` and warns on mailbox-wide reads.
 - [x] Skill carries an explicit provenance guard (To-tag + sender match).
+- [x] The 10 live task goals (13-22) rewritten to the alloc+handle+guard directive
+      (transactional, verified 10/0; before-state backed up, restore script saved).
+- [x] Canonical seed text captured in `ops/email-otp/task-seed-directive.md` so FUTURE
+      tasks can be born with it (operator seeds it at `create`).
 - [ ] Shipped in a rebuilt image and live via a cutover (operator-gated).
 - [ ] This ticket set to Done after the cutover.
 
@@ -78,3 +89,11 @@ separate cutover.
   over `alloc`+`--handle`). Edited `skills/email-otp/SKILL.md`: mailbox-wide warning +
   "Before you use a code or link" provenance guard. Committed (no push). Deploy held
   for the operator's next rebuild. Status Feedback.
+- 2026-11-25: deeper root cause - the human goal directive itself ordered the broad
+  read (`mailotp fetch --mailbox 01`). Confirmed fleet-wide: 10 goals (tasks 13-22)
+  carried it, 0 used alloc/handle; goals are per-task (not global), seeded by the
+  operator at creation. Rewrote the 10 live goals to the alloc+handle+guard directive
+  in one transaction (UPDATE 10, guard new=10/old=0, COMMIT); before-state backed up
+  and a restore script generated. Added `ops/email-otp/task-seed-directive.md` for
+  future-task seeding. The DB change is live now and needs no rebuild; the SKILL.md
+  change still rides the operator's next image build.
