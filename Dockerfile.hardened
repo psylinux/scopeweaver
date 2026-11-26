@@ -7,7 +7,7 @@
 #   failsafe ARTEX v0.3.15 build);
 # - npm ci --ignore-scripts and go mod verify;
 # - Node 22 copied from the pinned builder instead of curl | bash NodeSource;
-# - version suffix "-authfix.9" keeps the one-click updater disabled;
+# - version suffix "-authfix.10" keeps the one-click updater disabled;
 # - /usr/bin/chromium points at the Playwright Chromium for the api-recon skill.
 
 ARG GO_IMAGE=golang:1.26.10@sha256:cfa27959837144bf4649802ba38e59daffd0dd2a7994aa83daaf113285b0f551
@@ -22,7 +22,7 @@ ARG PLAYWRIGHT_VERSION=1.65.0
 # the image tag in docker-compose.local.yml. It used to be a literal inside the go
 # build line and drifted: the image was tagged authfix.9 while /api/health still
 # answered authfix.3.
-ARG ARTEX_VERSION=0.1.0-authfix.9
+ARG ARTEX_VERSION=0.1.0-authfix.10
 
 FROM ${NODE_IMAGE} AS frontend
 WORKDIR /src/web
