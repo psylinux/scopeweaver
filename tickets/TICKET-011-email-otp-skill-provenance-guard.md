@@ -1,7 +1,7 @@
 ---
 id: TICKET-011
 title: "Harden the email-otp skill against shared-mailbox noise"
-status: Feedback      # New | To-Do | WIP | Feedback | Done
+status: Done          # New | To-Do | WIP | Feedback | Done
 area: skill, docs
 priority: medium
 blocked_by: none
@@ -75,7 +75,7 @@ the recon-server Ansible `scopeweaver_image` / `scopeweaver_version` defaults.
       tasks can be born with it (operator seeds it at `create`).
 - [x] Shipped in a rebuilt image (authfix.10, d4040fd) and live via a cutover
       (2026-11-26; pause 13 / recreate / resume 13; /api/health=authfix.10, serve up).
-- [ ] This ticket set to Done (operator closes).
+- [x] This ticket set to Done (operator closed, 2026-11-26).
 
 ## Notes / dependencies
 
@@ -105,3 +105,4 @@ separate cutover.
   authfix.10 (the 51f072b ARG fix held), serve sidecar up (pollers 01/02 live, last sync
   ~2s), skill baked with the provenance guard, store.db persisted on sw_data. Ansible
   bumped (recon-server 9ecaa02). Ready for the operator to close.
+- 2026-11-26: operator closed. Status Done.
