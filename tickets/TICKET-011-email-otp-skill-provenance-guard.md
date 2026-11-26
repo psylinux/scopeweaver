@@ -73,8 +73,9 @@ the recon-server Ansible `scopeweaver_image` / `scopeweaver_version` defaults.
       (transactional, verified 10/0; before-state backed up, restore script saved).
 - [x] Canonical seed text captured in `ops/email-otp/task-seed-directive.md` so FUTURE
       tasks can be born with it (operator seeds it at `create`).
-- [ ] Shipped in a rebuilt image and live via a cutover (operator-gated).
-- [ ] This ticket set to Done after the cutover.
+- [x] Shipped in a rebuilt image (authfix.10, d4040fd) and live via a cutover
+      (2026-11-26; pause 13 / recreate / resume 13; /api/health=authfix.10, serve up).
+- [ ] This ticket set to Done (operator closes).
 
 ## Notes / dependencies
 
@@ -97,3 +98,10 @@ separate cutover.
   and a restore script generated. Added `ops/email-otp/task-seed-directive.md` for
   future-task seeding. The DB change is live now and needs no rebuild; the SKILL.md
   change still rides the operator's next image build.
+- 2026-11-26: deployed on operator request. Built `scopeweaver-local:0.1.0-authfix.10`
+  (`--build-arg ARTEX_VERSION=0.1.0-authfix.10`; Dockerfile default bumped to match,
+  commit d4040fd). Cutover: paused the running set (task 13 only), `docker compose up -d`
+  recreate, resumed 13; postgres + sw_data untouched. Verified: /api/health reports
+  authfix.10 (the 51f072b ARG fix held), serve sidecar up (pollers 01/02 live, last sync
+  ~2s), skill baked with the provenance guard, store.db persisted on sw_data. Ansible
+  bumped (recon-server 9ecaa02). Ready for the operator to close.
