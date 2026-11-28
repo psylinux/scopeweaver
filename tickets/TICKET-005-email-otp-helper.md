@@ -23,7 +23,7 @@ in the loop. The mailbox password never enters the agent's context.
 Operator request. Autonomous tasks (the Signal batch, tasks 13-22) need to sign up
 for accounts to reach authenticated surface, run A/B and IDOR/multi-account tests,
 and any flow gated by an emailed code or link. Until now the task conduct pointed at
-the HackerOne alias `psylinux@wearehackerone.com`, which forwards to the operator's
+the HackerOne alias `psylinux.hackerone.test01@gmail.com or psylinux.hackerone.test02@gmail.com`, which forwards to the operator's
 own inbox and is not readable by ARTEX. Replaced by two controlled Gmail mailboxes
 read over IMAP.
 
@@ -61,7 +61,7 @@ resolves these names.
 
 ## Task-description message (applied post-deploy, to tasks 13-22)
 
-Remove `(create them with psylinux@wearehackerone.com when a program asks for the HackerOne alias)`
+Remove `(create them with psylinux.hackerone.test01@gmail.com or psylinux.hackerone.test02@gmail.com when a program asks for the HackerOne alias)`
 and add to the conduct:
 
 > **Accounts and email.** Two controlled mailboxes are available for sign-ups, so you
@@ -103,7 +103,7 @@ and add to the conduct:
 
 - 2026-11-24: filed; helper + skill built and tested on branch `ticket-005-email-otp` (New -> WIP). Deploy and live task edits pending operator OK.
 - 2026-11-24: reworked `fetch` to print subject + full decoded body instead of a regex-extracted Code/Link, per operator (ARTEX agents extract themselves; OTPs can be in the subject).
-- 2026-11-24: interim deploy - built static `mailotp` (`CGO_ENABLED=0`), `docker cp` to `scopeweaver-local-scopeweaver-1:/app/data/bin/mailotp` (atomic swap) + `/usr/local/bin/mailotp` symlink; skill copied to `/app/skills/email-otp/`, visible to agents worker/auto/pentest. Pipeline proven with a simulated OTP (test01 -> test02). Task 14 (IBM) reactivated by injecting a new open objective (descriptions are read-only), pointing the agent at mailboxes 01/02 and away from the `psylinux@wearehackerone.com` alias.
+- 2026-11-24: interim deploy - built static `mailotp` (`CGO_ENABLED=0`), `docker cp` to `scopeweaver-local-scopeweaver-1:/app/data/bin/mailotp` (atomic swap) + `/usr/local/bin/mailotp` symlink; skill copied to `/app/skills/email-otp/`, visible to agents worker/auto/pentest. Pipeline proven with a simulated OTP (test01 -> test02). Task 14 (IBM) reactivated by injecting a new open objective (descriptions are read-only), pointing the agent at mailboxes 01/02 and away from the `psylinux.hackerone.test01@gmail.com or psylinux.hackerone.test02@gmail.com` alias.
 - 2026-11-24: live run on task 14 (IBM). Agent invoked `mailotp` for real (`mailboxes`, `fetch` 01+02) from 03:17; email-otp skill auto-loaded 5x and also picked up on tasks 16 and 23. Two issues surfaced: (1) **a code that lives only in the HTML part was dropped** - `fetch` returned the text/plain alternative alone; (2) IBM's own signup email-send (`www.ibm.com /account/apis/v2.0/emails/sendemail`) was blocked 403/502 by Akamai from the datacenter IP, so no fresh IBM code landed via www.ibm.com (agent pivoted to cloud.ibm.com/registration).
 - 2026-11-24: fixed (1) - `extractBody` now keeps both the plain and the tag-stripped HTML parts and drops `<style>`/`<script>` noise (so CSS cannot bury or truncate the code); added regression test `TestExtractBodyCodeOnlyInHTML`. Rebuilt and redeployed the interim binary; verified live against a real multipart email in mailbox 01 (both parts printed, CSS gone). (2) is an environment limitation (datacenter-IP WAF reputation), not a helper bug.
 - 2026-11-24: baked `mailotp` into the image (Dockerfile.hardened + stock Dockerfile, `/usr/local/bin/mailotp`); recon-server Ansible bumped to authfix.6; merged ticket-005 into `v0.1.0-authfix` (0c187ac) and deployed by image rebuild + container recreate (pause active tasks, `compose up -d`, resume). The 9 signal-batch tasks that still carried the alias in their read-only descriptions (13, 15-22) were each given an injected objective steering them to mailboxes 01/02.

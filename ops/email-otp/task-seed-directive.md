@@ -15,7 +15,7 @@ flow. (Existing tasks 13-22 were updated in place on 2026-11-25; see TICKET-011.
 
 ```
 For any signup, login, or verification flow that needs an email, use the controlled
-mailboxes instead of the psylinux@wearehackerone.com alias (that alias is not readable
+mailboxes instead of the psylinux.hackerone.test01@gmail.com or psylinux.hackerone.test02@gmail.com alias (that alias is not readable
 from this environment). Reserve a unique address with `mailotp alloc --mailbox 01`
 (use `--mailbox 02` for a second, independent account), enter the printed address in
 the target, then read ONLY your own reply with `mailotp fetch --handle <h> --wait 90`;
